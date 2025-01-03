@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>HiQ Interview Room</title>
+        <!-- Update paths to be absolute -->
+        <link href="/css/styles.css" rel="stylesheet">
+        <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+        <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+        <!-- Add Firebase -->
+        <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+        <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+        <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+        <script>
+            // Prevent redirecting to dashboard for candidates
+            if (window.location.pathname.startsWith('/interview/')) {
+                // Disable any automatic redirection from app.js
+                window.isInterviewRoom = true;
+            }
+        
+            // Initialize Firebase for interview room
+            document.addEventListener('DOMContentLoaded', async () => {
+                try {
+                    const response = await fetch('/api/auth/firebase-config');
+                    const firebaseConfig = await response.json();
+                    
+                    if (!firebase.apps.length) {
+                        firebase.initializeApp(firebaseConfig);
+                        console.log('Firebase initialized for interview room');
+                    }
+                } catch (error) {
+                    console.error('Failed to initialize Firebase:', error);
+                    const errorDiv = document.createElement('div');
+                    errorDiv.className = 'fixed top-4 right-4 bg-red-500 text-white px-6 py-3 rounded-lg shadow-lg';
+                    errorDiv.textContent = 'Failed to initialize interview system';
+                    document.body.appendChild(errorDiv);
+                    setTimeout(() => errorDiv.remove(), 5000);
+                }
+            });
+        </script>
+    </head>
+<body class="bg-gray-900 min-h-screen">
+    <!-- Welcome Modal -->
+    <div id="welcomeModal" class="modal-overlay fixed inset-0 flex items-center justify-center z-50">
+        <div class="welcome-modal bg-white rounded-lg shadow-xl p-8">
+            <h2 class="text-3xl font-bold mb-6 text-center">Welcome to Your Interview</h2>
+            
+            <div class="space-y-6">
+                <div class="bg-blue-50 p-6 rounded-lg">
+                    <h3 class="text-lg font-semibold mb-4 text-blue-900">Important Instructions</h3>
+                    <ul class="space-y-3 text-blue-800">
+                        <li class="flex items-center">
+                            <i class="fas fa-microphone-alt mr-3"></i>
+                            Speak clearly and at a normal pace
+                        </li>
+                        <li class="flex items-center">
+                            <i class="fas fa-video mr-3"></i>
+                            Ensure you stay within frame of the video
+                        </li>
+                        <li class="flex items-center">
+                            <i class="fas fa-clock mr-3"></i>
+                            Take your time to think before answering
+                        </li>
+                        <li class="flex items-center">
+                            <i class="fas fa-arrow-right mr-3"></i>
+                            Click "Next Question" after completing your response
+                        </li>
+                    </ul>
+                </div>
+
+                <div class="bg-gray-50 p-6 rounded-lg">
+                    <h3 class="text-lg font-semibold mb-2">Equipment Check</h3>
+                    <div class="space-y-4">
+                        <div class="flex items-center">
+                            <i id="cameraStatus" class="fas fa-circle mr-2 text-gray-300"></i>
+                            Camera
+                        </div>
+                        <div class="flex items-center">
+                            <i id="micStatus" class="fas fa-circle mr-2 text-gray-300"></i>
+                            Microphone
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-8 text-center">
+                <button id="startInterview" disabled 
+                        class="bg-blue-500 text-white px-8 py-3 rounded-lg font-semibold 
+                               shadow-lg transition duration-300 disabled:opacity-50 
+                               disabled:cursor-not-allowed hover:bg-blue-600">
+                    Start Interview
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Interview Room (initially hidden) -->
+    <main class="h-screen grid grid-cols-2 gap-4 p-4">
+        <!-- Left Side - Video -->
+        <div class="bg-black rounded-lg overflow-hidden relative">
+            <video id="userVideo" autoplay muted playsinline class="w-full h-full object-cover"></video>
+            
+            <!-- Video Controls -->
+            <div class="absolute bottom-4 left-1/2 transform -translate-x-1/2 
+                        bg-black bg-opacity-50 rounded-full px-6 py-3 space-x-6">
+                <button id="toggleVideo" class="text-white hover:text-gray-300">
+                    <i class="fas fa-video"></i>
+                </button>
+                <button id="toggleAudio" class="text-white hover:text-gray-300">
+                    <i class="fas fa-microphone"></i>
+                </button>
+            </div>
+
+            <!-- Timer -->
+            <div class="absolute top-4 left-4 bg-black bg-opacity-50 rounded-lg px-4 py-2">
+                <span id="timer" class="text-white font-mono text-xl">00:00</span>
+            </div>
+        </div>
+
+        <!-- Right Side - QnA Interface -->
+        <div class="flex flex-col bg-white rounded-lg">
+            <!-- Chat Header -->
+            <div class="p-4 border-b">
+                <h2 class="text-xl font-semibold">Interview Session</h2>
+                <div id="recordingStatus" class="text-sm text-gray-600">
+                    <i class="fas fa-circle text-red-500 animate-pulse"></i>
+                    Recording in progress...
+                </div>
+            </div>
+
+            <!-- Chat Messages Area -->
+            <div id="chatArea" class="flex-1 overflow-y-auto p-4 space-y-4"></div>
+
+            <!-- Action Buttons -->
+            <div class="border-t p-4 bg-gray-50">
+                <div class="flex justify-between items-center">
+                    <button id="endInterview" class="text-red-500 hover:text-red-600">
+                        <i class="fas fa-times-circle mr-2"></i>End Interview
+                    </button>
+                    <button id="nextQuestion" 
+                            class="bg-blue-500 hover:bg-blue-600 text-white px-6 py-2 
+                                   rounded-lg font-semibold">
+                        Next Question
+                    </button>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Completion Modal -->
+    <div id="completionModal" class="modal-overlay fixed inset-0 hidden flex items-center justify-center">
+        <div class="bg-white rounded-lg shadow-xl p-8 max-w-md w-full mx-4">
+            <h2 class="text-2xl font-bold mb-4">Interview Complete</h2>
+            <p class="text-gray-700 mb-6">
+                Thank you for completing the interview. Your responses have been recorded 
+                and are being analyzed. You may close this window now.
+            </p>
+            <button onclick="window.close()" 
+                    class="bg-blue-500 hover:bg-blue-600 text-white font-semibold 
+                           py-2 px-4 rounded-lg w-full">
+                Close Window
+            </button>
+        </div>
+    </div>
+
+    <script src="/js/interview-room.js"></script>
+</body>
+</html>
