@@ -11,6 +11,7 @@ export default function PublicInterviewRoom() {
   const [isRecording, setIsRecording] = useState(false);
   const [volume, setVolume] = useState(0);
   const [recognitionActive, setRecognitionActive] = useState(false);
+  const [questionHistory, setQuestionHistory] = useState([]);
 
   // Refs for media handling
   const videoRef = useRef(null);
@@ -285,12 +286,17 @@ if ('webkitSpeechRecognition' in window) {
   const handleNextQuestion = async () => {
     await stopRecording();
     
+    // Save current question and response to history
+    setQuestionHistory(prev => [...prev, {
+      ...currentQuestion,
+      response: transcript
+    }]);
+    
     const currentIndex = questions.findIndex(q => q.id === currentQuestion?.id);
     if (currentIndex < questions.length - 1) {
       setCurrentQuestion(questions[currentIndex + 1]);
       setTranscript('');
       
-      // Add a small delay before starting the next recording
       setTimeout(async () => {
         await startRecording();
       }, 100);
@@ -301,110 +307,135 @@ if ('webkitSpeechRecognition' in window) {
 
   // ... [Keep existing render logic from your component] ...
   
+  
   return (
-    <div className="min-h-screen bg-gray-100">
-      <div className="max-w-4xl mx-auto py-8 px-4">
-        <div className="bg-white rounded-lg shadow-md p-6">
-          {/* Video Preview */}
-          {hasVideo && (
-            <div className="mb-6">
-              <video
-                ref={videoRef}
-                autoPlay
-                playsInline
-                muted
-                className="w-full max-w-2xl mx-auto rounded-lg shadow-md bg-black"
-              />
-            </div>
-          )}
-
-          {/* Volume Indicator */}
-          {volume > 0 && (
-            <div className="mb-6">
-              <div className="w-full bg-gray-200 rounded-full h-2">
-                <div 
-                  className="bg-blue-600 h-2 rounded-full transition-all duration-200" 
-                  style={{ width: `${Math.min(100, (volume / 255) * 100)}%` }}
-                />
+    <div className="container-fluid vh-100 bg-light p-3">
+      <div className="row h-100">
+        {/* Left Column */}
+        <div className="col-6">
+          {/* Video Container - Top Half */}
+          <div className="row mb-3" style={{ height: '48%' }}>
+            <div className="col">
+              <div className="card h-100">
+                <div className="card-body p-0 d-flex align-items-center justify-content-center bg-dark rounded">
+                  {hasVideo ? (
+                    <video
+                      ref={videoRef}
+                      autoPlay
+                      playsInline
+                      muted
+                      className="w-100 h-100 object-fit-cover"
+                    />
+                  ) : (
+                    <div className="text-white">
+                      No video available
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
-          )}
-
-          {/* Interview Content */}
-<div className="max-w-2xl mx-auto">
-  {status === 'ready' && (
-    <div className="text-center">
-      <h2 className="text-2xl font-bold text-gray-900 mb-4">
-        Ready to begin your interview?
-      </h2>
-      <p className="text-gray-600 mb-6">
-        {hasVideo 
-          ? "Make sure you're in a well-lit room and your camera and microphone are working."
-          : "Make sure your microphone is working properly."}
-      </p>
-      <button
-        onClick={startRecording}
-        className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors"
-      >
-        Start Interview
-      </button>
-    </div>
-  )}
-
-  {status === 'recording' && currentQuestion && (
-    <>
-      {/* Question Display */}
-      <div className="bg-gray-50 p-6 rounded-lg mb-6">
-        <h3 className="text-lg font-medium text-gray-900 mb-2">
-          {currentQuestion.text}
-        </h3>
-        {currentQuestion.hint && (
-          <p className="text-sm text-gray-600">
-            Hint: {currentQuestion.hint}
-          </p>
-        )}
-      </div>
-
-      {/* Live Transcript */}
-      <div className="mb-6 p-4 bg-gray-50 rounded-lg">
-        <h4 className="text-sm font-medium text-gray-700 mb-2">Your Response:</h4>
-        <div className="min-h-[100px] text-gray-600 whitespace-pre-wrap">
-          {transcript || 'Listening to your response...'}
+          </div>
+  
+          {/* Instructions Panel - Bottom Half */}
+          <div className="row" style={{ height: '48%' }}>
+            <div className="col">
+              <div className="card h-100">
+                <div className="card-body">
+                  <h5 className="card-title">Instructions Panel</h5>
+                  {volume > 0 && (
+                    <div className="mb-3">
+                      <div className="progress" style={{ height: '4px' }}>
+                        <div 
+                          className="progress-bar bg-primary" 
+                          style={{ width: `${Math.min(100, (volume / 255) * 100)}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                  <div className="instruction-content">
+                    {volume < 50 && isRecording && (
+                      <div className="alert alert-warning d-flex align-items-center py-2">
+                        <i className="bi bi-volume-up me-2"></i>
+                        Please speak louder
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
-
-      {/* Controls */}
-      <div className="flex justify-between items-center">
-        <button
-          onClick={handleNextQuestion}
-          className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center"
-        >
-          Next Question
-          <svg className="w-5 h-5 ml-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-          </svg>
-        </button>
-        <div className="flex items-center">
-          <span className="inline-block w-2 h-2 bg-red-600 rounded-full animate-pulse mr-2"/>
-          <span className="text-sm text-gray-500">Recording</span>
-        </div>
-      </div>
-    </>
-  )}
-
-  {status === 'complete' && (
-    <div className="text-center">
-      <h2 className="text-2xl font-bold text-gray-900 mb-4">
-        Interview Complete
-      </h2>
-      <p className="text-gray-600 mb-6">
-        Thank you for completing your interview. Your responses have been recorded.
-      </p>
-    </div>
-  )}
-</div>
+  
+        {/* Right Column - Q&A */}
+        <div className="col-6">
+          <div className="card h-100">
+            <div className="card-body d-flex flex-column">
+              {status === 'ready' ? (
+                <div className="d-flex align-items-center justify-content-center flex-grow-1">
+                  <div className="text-center">
+                    <h2 className="mb-4">Ready to begin your interview?</h2>
+                    <button
+                      onClick={startRecording}
+                      className="btn btn-primary btn-lg"
+                    >
+                      Start Interview
+                    </button>
+                  </div>
+                </div>
+              ) : status === 'recording' ? (
+                <>
+                  <div className="flex-grow-1 overflow-auto mb-3">
+                    {questions.slice(0, questions.findIndex(q => q.id === currentQuestion?.id) + 1).map((question) => (
+                      <div key={question.id} className="mb-3">
+                        <div className="p-3 bg-light rounded">
+                          <h5 className="mb-2">{question.text}</h5>
+                          {question.hint && (
+                            <p className="text-muted small mb-0">{question.hint}</p>
+                          )}
+                        </div>
+                        {(question.id !== currentQuestion?.id || transcript) && (
+                          <div className="ms-4 mt-2 p-3 bg-info bg-opacity-10 rounded">
+                            <p className="mb-0">
+                              {question.id === currentQuestion?.id ? transcript : "Previous response"}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="pt-3 border-top d-flex justify-content-between align-items-center">
+                    <button
+                      onClick={handleNextQuestion}
+                      className="btn btn-primary"
+                    >
+                      Next Question
+                    </button>
+                    {isRecording && (
+                      <div className="d-flex align-items-center">
+                        <div className="spinner-grow spinner-grow-sm text-danger me-2" 
+                             role="status" style={{ animationDuration: '1.5s' }}>
+                          <span className="visually-hidden">Recording...</span>
+                        </div>
+                        <span className="text-muted small">Recording</span>
+                      </div>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <div className="d-flex align-items-center justify-content-center flex-grow-1">
+                  <div className="text-center">
+                    <h2 className="mb-4">Interview Complete</h2>
+                    <p className="text-muted">
+                      Thank you for completing your interview.
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </div>
     </div>
   );
 }
+
