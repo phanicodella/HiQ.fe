@@ -2,11 +2,12 @@ import React, { useState, useEffect, useRef } from "react";
 import { useParams } from "react-router-dom";
 import axios from "axios";
 import QnASection from "../components/QnASection";
-import { interviewQuestions } from "../data/interview-questions";
+import api from '../services/api';
 
 export default function PublicInterviewRoom() {
   const [status, setStatus] = useState("initializing");
   const [currentQuestion, setCurrentQuestion] = useState(null);
+  const [questions, setQuestions] = useState([]);
   const [transcript, setTranscript] = useState("");
   const [error, setError] = useState(null);
   const [hasVideo, setHasVideo] = useState(false);
@@ -15,7 +16,6 @@ export default function PublicInterviewRoom() {
   const [recognitionActive, setRecognitionActive] = useState(false);
   const [questionHistory, setQuestionHistory] = useState([]);
 
-  // Refs for media handling
   const videoRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const streamRef = useRef(null);
@@ -26,15 +26,11 @@ export default function PublicInterviewRoom() {
 
   const { sessionId } = useParams();
 
-  // Test questions (to be replaced with OpenAI)
-  const questions = interviewQuestions;
-
   useEffect(() => {
     initializeInterview();
     return () => cleanupMedia();
   }, []);
 
-  // Set up volume monitoring when recording starts
   useEffect(() => {
     if (isRecording) {
       const interval = setInterval(checkAudioVolume, 100);
@@ -42,111 +38,95 @@ export default function PublicInterviewRoom() {
     }
   }, [isRecording]);
 
+  const setupSpeechRecognition = () => {
+    if ("webkitSpeechRecognition" in window) {
+      recognitionRef.current = new window.webkitSpeechRecognition();
+      recognitionRef.current.continuous = true;
+      recognitionRef.current.interimResults = true;
+  
+      recognitionRef.current.onresult = (event) => {
+        let finalTranscript = "";
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          if (event.results[i].isFinal) {
+            finalTranscript += event.results[i][0].transcript + " ";
+          }
+        }
+        if (finalTranscript) {
+          setTranscript((prev) => prev + finalTranscript);
+        }
+      };
+  
+      recognitionRef.current.onerror = (event) => {
+        console.error("Speech recognition error:", event.error);
+        if (recognitionActive) {
+          try {
+            recognitionRef.current.start();
+          } catch (err) {
+            console.log("Recognition restart error:", err);
+          }
+        }
+      };
+  
+      recognitionRef.current.onend = () => {
+        if (recognitionActive) {
+          try {
+            recognitionRef.current.start();
+            console.log("Recognition restarted");
+          } catch (err) {
+            console.log("Recognition restart error:", err);
+          }
+        }
+      };
+    } else {
+      console.error("Speech recognition is not supported in this browser.");
+    }
+  };
+  
+
   const initializeInterview = async () => {
     try {
-      // First try to get both video and audio
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-            frameRate: { ideal: 15 },
-          },
-          audio: true,
-        });
-        streamRef.current = stream;
-        setHasVideo(true);
-
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          await videoRef.current.play();
-        }
-      } catch (videoErr) {
-        console.log(
-          "Video access failed, falling back to audio only:",
-          videoErr
-        );
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: true,
-        });
-        streamRef.current = stream;
-        setHasVideo(false);
+      // Setup media devices
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 15 } },
+        audio: true
+      });
+  
+      streamRef.current = stream;
+      setHasVideo(true);
+  
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
       }
-
-      // Set up audio analysis
-      if (streamRef.current.getAudioTracks().length > 0) {
-        audioContextRef.current = new (window.AudioContext ||
-          window.webkitAudioContext)();
+  
+      // Setup audio analysis
+      if (stream.getAudioTracks().length > 0) {
+        audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
         analyserRef.current = audioContextRef.current.createAnalyser();
-        const source = audioContextRef.current.createMediaStreamSource(
-          streamRef.current
-        );
+        const source = audioContextRef.current.createMediaStreamSource(stream);
         source.connect(analyserRef.current);
       }
-
-      // Initialize speech recognition
-      // Modify the speech recognition setup in initializeInterview
-      if ("webkitSpeechRecognition" in window) {
-        recognitionRef.current = new window.webkitSpeechRecognition();
-        recognitionRef.current.continuous = true;
-        recognitionRef.current.interimResults = true;
-
-        recognitionRef.current.onresult = (event) => {
-          let finalTranscript = "";
-          for (let i = event.resultIndex; i < event.results.length; ++i) {
-            if (event.results[i].isFinal) {
-              finalTranscript += event.results[i][0].transcript + " ";
-            }
-          }
-          if (finalTranscript) {
-            setTranscript((prev) => prev + finalTranscript);
-          }
-        };
-
-        // Add error handler
-        recognitionRef.current.onerror = (event) => {
-          console.error("Speech recognition error:", event.error);
-          // Restart recognition if it errors out
-          if (recognitionActive) {
-            try {
-              recognitionRef.current.start();
-            } catch (err) {
-              console.log("Recognition restart error:", err);
-            }
-          }
-        };
-
-        // Modify onend handler
-        recognitionRef.current.onend = () => {
-          console.log("Recognition ended, active status:", recognitionActive);
-          if (recognitionActive) {
-            try {
-              recognitionRef.current.start();
-              console.log("Recognition restarted");
-            } catch (err) {
-              console.log("Recognition restart error:", err);
-            }
-          }
-        };
-      }
-
-      // Set up media recorder for audio
-      mediaRecorderRef.current = new MediaRecorder(streamRef.current);
+  
+      // Setup media recorder
+      mediaRecorderRef.current = new MediaRecorder(stream);
       mediaRecorderRef.current.ondataavailable = handleDataAvailable;
-
+  
+      // Setup speech recognition
+      if ("webkitSpeechRecognition" in window) {
+        setupSpeechRecognition();
+      }
+  
       setStatus("ready");
     } catch (err) {
       console.error("Interview initialization error:", err);
-      setError(
-        "Could not access your camera or microphone. Please check your device settings."
-      );
+      setError("Could not access your camera or microphone. Please check your device settings.");
       setStatus("error");
     }
   };
-
+  
   const cleanupMedia = () => {
     if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current.getTracks().forEach(track => track.stop());
     }
     if (audioContextRef.current?.state !== "closed") {
       audioContextRef.current?.close();
@@ -174,20 +154,14 @@ export default function PublicInterviewRoom() {
 
   const startRecording = async () => {
     try {
-      if (!currentQuestion) {
-        setCurrentQuestion(questions[0]);
-      }
-
       setIsRecording(true);
       setStatus("recording");
-      setRecognitionActive(true); // Add this
+      setRecognitionActive(true);
 
-      // Start media recorder
       if (mediaRecorderRef.current?.state !== "recording") {
         mediaRecorderRef.current?.start(1000);
       }
 
-      // Start speech recognition
       if (recognitionRef.current) {
         try {
           await recognitionRef.current.start();
@@ -206,7 +180,7 @@ export default function PublicInterviewRoom() {
 
   const stopRecording = async () => {
     try {
-      setRecognitionActive(false); // Add this first
+      setRecognitionActive(false);
 
       if (mediaRecorderRef.current?.state === "recording") {
         mediaRecorderRef.current.stop();
@@ -238,26 +212,26 @@ export default function PublicInterviewRoom() {
           canvas.height = videoRef.current.videoHeight;
           context.drawImage(videoRef.current, 0, 0);
 
-          // Convert to blob and send for fraud detection
-          canvas.toBlob(
-            async (blob) => {
-              const formData = new FormData();
-              formData.append("frame", blob);
-              formData.append("sessionId", sessionId);
+          canvas.toBlob(async (blob) => {
+            const formData = new FormData();
+            formData.append("frame", blob);
+            formData.append("sessionId", sessionId);
 
-              try {
-                await axios.post("/api/fraud-detection", formData);
-              } catch (err) {
-                console.error("Fraud detection error:", err);
-              }
-            },
-            "image/jpeg",
-            0.8
-          );
+            try {
+              await api.post("/api/fraud-detection", formData, {
+                params: {
+                  sessionId,
+                  timestamp: Date.now()
+                }
+              });
+            } catch (err) {
+              console.error("Fraud detection error:", err);
+            }
+          }, "image/jpeg", 0.8);
         } catch (err) {
           console.error("Frame capture error:", err);
         }
-      }, 5000); // Check every 5 seconds
+      }, 5000);
     }
   };
 
@@ -274,66 +248,81 @@ export default function PublicInterviewRoom() {
         formData.append("audio", event.data);
         formData.append("sessionId", sessionId);
         formData.append("questionId", currentQuestion?.id);
+        formData.append("transcript", transcript);
 
-        await axios.post("/api/speech-analysis", formData);
+        await api.post(`/api/interviews/${sessionId}/answer`, formData);
       } catch (err) {
-        console.error("Speech analysis error:", err);
+        console.error("Answer submission error:", err);
       }
+    }
+  };
+
+  const startInterview = async () => {
+    try {
+      // Fetch questions for the session
+      const response = await api.get(`/api/interviews/${sessionId}/questions`);
+  
+      // Validate response
+      if (!response.data.questions || response.data.questions.length === 0) {
+        throw new Error('No questions received');
+      }
+  
+      // Save questions and set the first question
+      const questions = response.data.questions;
+      setQuestions(questions);
+      setCurrentQuestion(questions[0]);
+  
+      // Start recording
+      await startRecording();
+    } catch (err) {
+      console.error('Failed to start interview:', err);
+      setError('Could not start the interview. Please try again.');
     }
   };
 
   const handleNextQuestion = async () => {
     await stopRecording();
-
-    // Save current question and response to history
+  
     if (currentQuestion) {
+      // Save the current question's response to history
       setQuestionHistory((prev) => {
-        // Check if question already exists in history
-        const existingIndex = prev.findIndex(
-          (q) => q.id === currentQuestion.id
-        );
         const updatedHistory = [...prev];
-
-        const historyItem = {
-          ...currentQuestion,
-          response: transcript,
-        };
-
+        const existingIndex = updatedHistory.findIndex(q => q.id === currentQuestion.id);
+        const historyItem = { ...currentQuestion, response: transcript };
+  
         if (existingIndex >= 0) {
-          // Update existing question
           updatedHistory[existingIndex] = historyItem;
         } else {
-          // Add new question
           updatedHistory.push(historyItem);
         }
-
+  
         return updatedHistory;
       });
     }
-
-    const currentIndex = questions.findIndex(
-      (q) => q.id === currentQuestion?.id
-    );
-    if (currentIndex < questions.length - 1) {
-      setCurrentQuestion(questions[currentIndex + 1]);
-      setTranscript("");
-
-      setTimeout(async () => {
-        await startRecording();
-      }, 100);
-    } else {
-      setStatus("complete");
+  
+    try {
+      // Fetch the next question
+      const response = await api.get(`/api/interviews/${sessionId}/next-question`, {
+        params: { current: currentQuestion?.id },
+      });
+  
+      if (response.data.isComplete) {
+        setStatus("complete"); // Mark interview as complete
+      } else {
+        setCurrentQuestion(response.data.question); // Set the next question
+        setTranscript(""); // Clear the transcript
+        await startRecording(); // Start recording for the next question
+      }
+    } catch (err) {
+      console.error("Failed to get next question:", err);
+      setError("Could not load the next question. Please try again.");
     }
   };
-
-  // ... [Keep existing render logic from your component] ...
-
+  
   return (
     <div className="container-fluid vh-100 bg-light p-3">
       <div className="row h-100">
-        {/* Left Column */}
         <div className="col-6">
-          {/* Video Container - Top Half */}
           <div className="row mb-3" style={{ height: "48%" }}>
             <div className="col">
               <div className="card h-100">
@@ -354,7 +343,6 @@ export default function PublicInterviewRoom() {
             </div>
           </div>
 
-          {/* Instructions Panel - Bottom Half */}
           <div className="row" style={{ height: "48%" }}>
             <div className="col">
               <div className="card h-100">
@@ -379,6 +367,11 @@ export default function PublicInterviewRoom() {
                         Please speak louder
                       </div>
                     )}
+                    {error && (
+                      <div className="alert alert-danger" role="alert">
+                        {error}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -386,8 +379,6 @@ export default function PublicInterviewRoom() {
           </div>
         </div>
 
-        {/* Right Column - Q&A */}
-        {/* Right Column - Q&A */}
         <div className="col-6">
           <QnASection
             status={status}
@@ -396,11 +387,11 @@ export default function PublicInterviewRoom() {
             transcript={transcript}
             questionHistory={questionHistory}
             isRecording={isRecording}
-            onStartInterview={startRecording}
+            onStartInterview={startInterview}
             onNextQuestion={handleNextQuestion}
           />
         </div>
       </div>
     </div>
-  );
+);
 }
