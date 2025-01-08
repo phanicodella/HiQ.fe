@@ -1,20 +1,23 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useParams } from "react-router-dom";
-import axios from "axios";
+import api from "../services/api";
 import QnASection from "../components/QnASection";
 import api from '../services/api';
 
 export default function PublicInterviewRoom() {
+  // Interview state
   const [status, setStatus] = useState("initializing");
   const [currentQuestion, setCurrentQuestion] = useState(null);
   const [questions, setQuestions] = useState([]);
+  const [questions, setQuestions] = useState([]);
   const [transcript, setTranscript] = useState("");
   const [error, setError] = useState(null);
-  const [hasVideo, setHasVideo] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [volume, setVolume] = useState(0);
   const [recognitionActive, setRecognitionActive] = useState(false);
   const [questionHistory, setQuestionHistory] = useState([]);
+  const [showGuidelines, setShowGuidelines] = useState(true);
+  const [analysis, setAnalysis] = useState(null);
 
   const videoRef = useRef(null);
   const mediaRecorderRef = useRef(null);
@@ -27,7 +30,9 @@ export default function PublicInterviewRoom() {
   const { sessionId } = useParams();
 
   useEffect(() => {
-    initializeInterview();
+    if (!showGuidelines) {
+      initializeInterview();
+    }
     return () => cleanupMedia();
   }, []);
 
@@ -152,7 +157,7 @@ export default function PublicInterviewRoom() {
     }
   };
 
-  const startRecording = async () => {
+  const startRecording = () => {
     try {
       setIsRecording(true);
       setStatus("recording");
@@ -173,7 +178,7 @@ export default function PublicInterviewRoom() {
 
       startFraudDetection();
     } catch (err) {
-      console.error("Error starting recording:", err);
+      console.error("Recording start error:", err);
       setError("Failed to start recording. Please refresh and try again.");
     }
   };
@@ -186,24 +191,78 @@ export default function PublicInterviewRoom() {
         mediaRecorderRef.current.stop();
       }
 
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.stop();
-          console.log("Recognition stopped");
-        } catch (err) {
-          console.log("Recognition stop error:", err);
-        }
-      }
-
       setIsRecording(false);
       stopFraudDetection();
     } catch (err) {
-      console.error("Error stopping recording:", err);
+      console.error("Recording stop error:", err);
+    }
+  };
+
+  const handleDataAvailable = async (event) => {
+    if (event.data.size > 0 && currentQuestion) {
+      try {
+        const formData = new FormData();
+        formData.append("audio", event.data);
+        formData.append("transcript", transcript);
+        formData.append("questionId", currentQuestion.id.toString());
+
+        const response = await api.post(
+          `/api/interviews/${sessionId}/answer`,
+          formData
+        );
+
+        if (response.data.analysis) {
+          setAnalysis(response.data.analysis);
+        }
+      } catch (err) {
+        console.error("Answer submission error:", err);
+      }
+    }
+  };
+
+  const handleNextQuestion = async () => {
+    await stopRecording();
+
+    // Save current question and response
+    if (currentQuestion) {
+      setQuestionHistory((prev) => [
+        ...prev,
+        {
+          ...currentQuestion,
+          response: transcript,
+          analysis: analysis,
+        },
+      ]);
+    }
+
+    try {
+      const response = await api.get(
+        `/api/interviews/${sessionId}/next-question`,
+        {
+          params: { current: currentQuestion?.id },
+        }
+      );
+
+      if (response.data.isComplete) {
+        setStatus("complete");
+      } else {
+        setCurrentQuestion(response.data.question);
+        setTranscript("");
+        setAnalysis(null);
+        
+        // Short delay before starting new recording
+        setTimeout(() => {
+          startRecording();
+        }, 100);
+      }
+    } catch (err) {
+      console.error("Next question error:", err);
+      setError("Failed to load next question. Please try again.");
     }
   };
 
   const startFraudDetection = () => {
-    if (hasVideo && videoRef.current) {
+    if (videoRef.current && fraudDetectionIntervalRef.current === null) {
       fraudDetectionIntervalRef.current = setInterval(async () => {
         try {
           const canvas = document.createElement("canvas");
@@ -327,17 +386,13 @@ export default function PublicInterviewRoom() {
             <div className="col">
               <div className="card h-100">
                 <div className="card-body p-0 d-flex align-items-center justify-content-center bg-dark rounded">
-                  {hasVideo ? (
-                    <video
-                      ref={videoRef}
-                      autoPlay
-                      playsInline
-                      muted
-                      className="w-100 h-100 object-fit-cover"
-                    />
-                  ) : (
-                    <div className="text-white">No video available</div>
-                  )}
+                  <video
+                    ref={videoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className="w-100 h-100 object-fit-cover"
+                  />
                 </div>
               </div>
             </div>
@@ -347,16 +402,32 @@ export default function PublicInterviewRoom() {
             <div className="col">
               <div className="card h-100">
                 <div className="card-body">
-                  <h5 className="card-title">Instructions Panel</h5>
-                  {volume > 0 && (
-                    <div className="mb-3">
-                      <div className="progress" style={{ height: "4px" }}>
-                        <div
-                          className="progress-bar bg-primary"
-                          style={{
-                            width: `${Math.min(100, (volume / 255) * 100)}%`,
-                          }}
-                        />
+                  <h5 className="card-title">Interview Progress</h5>
+                  {analysis && (
+                    <div className="analysis-section mt-3">
+                      <h6>Response Analysis</h6>
+                      <div className="analysis-content">
+                        <p><strong>Score:</strong> {analysis.score}/10</p>
+                        {analysis.strengths?.length > 0 && (
+                          <div className="mb-2">
+                            <strong>Strengths:</strong>
+                            <ul className="mb-0">
+                              {analysis.strengths.map((s, i) => (
+                                <li key={i}>{s}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        {analysis.areas_for_improvement?.length > 0 && (
+                          <div>
+                            <strong>Areas for Improvement:</strong>
+                            <ul className="mb-0">
+                              {analysis.areas_for_improvement.map((a, i) => (
+                                <li key={i}>{a}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}
@@ -388,10 +459,18 @@ export default function PublicInterviewRoom() {
             questionHistory={questionHistory}
             isRecording={isRecording}
             onStartInterview={startInterview}
+            onStartInterview={startInterview}
             onNextQuestion={handleNextQuestion}
           />
         </div>
       </div>
+
+      {/* Error Messages */}
+      {error && (
+        <div className="position-fixed bottom-0 start-50 translate-middle-x mb-4">
+          <div className="alert alert-danger">{error}</div>
+        </div>
+      )}
     </div>
 );
 }
