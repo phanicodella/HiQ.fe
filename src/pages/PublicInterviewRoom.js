@@ -1,24 +1,23 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useParams } from "react-router-dom";
-import api from "../services/api";
-import QnASection from "../components/QnASection";
 import api from '../services/api';
+import QnASection from '../components/QnASection';
 
 export default function PublicInterviewRoom() {
-  // Interview state
+  // State Management
   const [status, setStatus] = useState("initializing");
   const [currentQuestion, setCurrentQuestion] = useState(null);
   const [questions, setQuestions] = useState([]);
-  const [questions, setQuestions] = useState([]);
   const [transcript, setTranscript] = useState("");
   const [error, setError] = useState(null);
+  const [hasVideo, setHasVideo] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [volume, setVolume] = useState(0);
   const [recognitionActive, setRecognitionActive] = useState(false);
   const [questionHistory, setQuestionHistory] = useState([]);
-  const [showGuidelines, setShowGuidelines] = useState(true);
-  const [analysis, setAnalysis] = useState(null);
+  const [fraudAlerts, setFraudAlerts] = useState([]);
 
+  // Refs
   const videoRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const streamRef = useRef(null);
@@ -29,13 +28,13 @@ export default function PublicInterviewRoom() {
 
   const { sessionId } = useParams();
 
+  // Cleanup Effect
   useEffect(() => {
-    if (!showGuidelines) {
-      initializeInterview();
-    }
+    initializeInterview();
     return () => cleanupMedia();
   }, []);
 
+  // Audio Volume Effect
   useEffect(() => {
     if (isRecording) {
       const interval = setInterval(checkAudioVolume, 100);
@@ -43,6 +42,7 @@ export default function PublicInterviewRoom() {
     }
   }, [isRecording]);
 
+  // Speech Recognition Setup
   const setupSpeechRecognition = () => {
     if ("webkitSpeechRecognition" in window) {
       recognitionRef.current = new window.webkitSpeechRecognition();
@@ -76,7 +76,6 @@ export default function PublicInterviewRoom() {
         if (recognitionActive) {
           try {
             recognitionRef.current.start();
-            console.log("Recognition restarted");
           } catch (err) {
             console.log("Recognition restart error:", err);
           }
@@ -86,11 +85,10 @@ export default function PublicInterviewRoom() {
       console.error("Speech recognition is not supported in this browser.");
     }
   };
-  
 
+  // Interview Initialization
   const initializeInterview = async () => {
     try {
-      // Setup media devices
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 15 } },
         audio: true
@@ -104,7 +102,7 @@ export default function PublicInterviewRoom() {
         await videoRef.current.play();
       }
   
-      // Setup audio analysis
+      // Audio Analysis Setup
       if (stream.getAudioTracks().length > 0) {
         audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
         analyserRef.current = audioContextRef.current.createAnalyser();
@@ -112,11 +110,9 @@ export default function PublicInterviewRoom() {
         source.connect(analyserRef.current);
       }
   
-      // Setup media recorder
       mediaRecorderRef.current = new MediaRecorder(stream);
       mediaRecorderRef.current.ondataavailable = handleDataAvailable;
   
-      // Setup speech recognition
       if ("webkitSpeechRecognition" in window) {
         setupSpeechRecognition();
       }
@@ -128,7 +124,8 @@ export default function PublicInterviewRoom() {
       setStatus("error");
     }
   };
-  
+
+  // Cleanup Function
   const cleanupMedia = () => {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => track.stop());
@@ -143,11 +140,10 @@ export default function PublicInterviewRoom() {
         console.log("Recognition cleanup error:", err);
       }
     }
-    if (fraudDetectionIntervalRef.current) {
-      clearInterval(fraudDetectionIntervalRef.current);
-    }
+    stopFraudDetection();
   };
 
+  // Audio Volume Check
   const checkAudioVolume = () => {
     if (analyserRef.current) {
       const array = new Uint8Array(analyserRef.current.frequencyBinCount);
@@ -157,7 +153,8 @@ export default function PublicInterviewRoom() {
     }
   };
 
-  const startRecording = () => {
+  // Recording Controls
+  const startRecording = async () => {
     try {
       setIsRecording(true);
       setStatus("recording");
@@ -170,7 +167,6 @@ export default function PublicInterviewRoom() {
       if (recognitionRef.current) {
         try {
           await recognitionRef.current.start();
-          console.log("Recognition started");
         } catch (err) {
           console.log("Recognition already started:", err);
         }
@@ -178,7 +174,7 @@ export default function PublicInterviewRoom() {
 
       startFraudDetection();
     } catch (err) {
-      console.error("Recording start error:", err);
+      console.error("Error starting recording:", err);
       setError("Failed to start recording. Please refresh and try again.");
     }
   };
@@ -186,83 +182,26 @@ export default function PublicInterviewRoom() {
   const stopRecording = async () => {
     try {
       setRecognitionActive(false);
-
       if (mediaRecorderRef.current?.state === "recording") {
         mediaRecorderRef.current.stop();
       }
-
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch (err) {
+          console.log("Recognition stop error:", err);
+        }
+      }
       setIsRecording(false);
       stopFraudDetection();
     } catch (err) {
-      console.error("Recording stop error:", err);
+      console.error("Error stopping recording:", err);
     }
   };
 
-  const handleDataAvailable = async (event) => {
-    if (event.data.size > 0 && currentQuestion) {
-      try {
-        const formData = new FormData();
-        formData.append("audio", event.data);
-        formData.append("transcript", transcript);
-        formData.append("questionId", currentQuestion.id.toString());
-
-        const response = await api.post(
-          `/api/interviews/${sessionId}/answer`,
-          formData
-        );
-
-        if (response.data.analysis) {
-          setAnalysis(response.data.analysis);
-        }
-      } catch (err) {
-        console.error("Answer submission error:", err);
-      }
-    }
-  };
-
-  const handleNextQuestion = async () => {
-    await stopRecording();
-
-    // Save current question and response
-    if (currentQuestion) {
-      setQuestionHistory((prev) => [
-        ...prev,
-        {
-          ...currentQuestion,
-          response: transcript,
-          analysis: analysis,
-        },
-      ]);
-    }
-
-    try {
-      const response = await api.get(
-        `/api/interviews/${sessionId}/next-question`,
-        {
-          params: { current: currentQuestion?.id },
-        }
-      );
-
-      if (response.data.isComplete) {
-        setStatus("complete");
-      } else {
-        setCurrentQuestion(response.data.question);
-        setTranscript("");
-        setAnalysis(null);
-        
-        // Short delay before starting new recording
-        setTimeout(() => {
-          startRecording();
-        }, 100);
-      }
-    } catch (err) {
-      console.error("Next question error:", err);
-      setError("Failed to load next question. Please try again.");
-    }
-  };
-
+  // Fraud Detection
   const startFraudDetection = () => {
-    if (videoRef.current && fraudDetectionIntervalRef.current === null) {
+    if (hasVideo && videoRef.current) {
       fraudDetectionIntervalRef.current = setInterval(async () => {
         try {
           const canvas = document.createElement("canvas");
@@ -275,16 +214,21 @@ export default function PublicInterviewRoom() {
             const formData = new FormData();
             formData.append("frame", blob);
             formData.append("sessionId", sessionId);
+            formData.append("timestamp", Date.now().toString());
 
             try {
-              await api.post("/api/fraud-detection", formData, {
-                params: {
-                  sessionId,
-                  timestamp: Date.now()
-                }
-              });
+              const response = await api.post("/fraud-detection", formData);
+              
+              // Handle fraud detection response
+              if (response.data.analysis.metrics.warnings.length > 0) {
+                setFraudAlerts(response.data.analysis.metrics.warnings);
+              } else {
+                setFraudAlerts([]);
+              }
+
             } catch (err) {
               console.error("Fraud detection error:", err);
+              setFraudAlerts(["Unable to verify video integrity"]);
             }
           }, "image/jpeg", 0.8);
         } catch (err) {
@@ -300,6 +244,7 @@ export default function PublicInterviewRoom() {
     }
   };
 
+  // Data Handling
   const handleDataAvailable = async (event) => {
     if (event.data.size > 0) {
       try {
@@ -316,22 +261,17 @@ export default function PublicInterviewRoom() {
     }
   };
 
+  // Interview Flow Controls
   const startInterview = async () => {
     try {
-      // Fetch questions for the session
       const response = await api.get(`/api/interviews/${sessionId}/questions`);
-  
-      // Validate response
-      if (!response.data.questions || response.data.questions.length === 0) {
+      
+      if (!response.data.questions?.length) {
         throw new Error('No questions received');
       }
-  
-      // Save questions and set the first question
-      const questions = response.data.questions;
-      setQuestions(questions);
-      setCurrentQuestion(questions[0]);
-  
-      // Start recording
+      
+      setQuestions(response.data.questions);
+      setCurrentQuestion(response.data.questions[0]);
       await startRecording();
     } catch (err) {
       console.error('Failed to start interview:', err);
@@ -343,8 +283,7 @@ export default function PublicInterviewRoom() {
     await stopRecording();
   
     if (currentQuestion) {
-      // Save the current question's response to history
-      setQuestionHistory((prev) => {
+      setQuestionHistory(prev => {
         const updatedHistory = [...prev];
         const existingIndex = updatedHistory.findIndex(q => q.id === currentQuestion.id);
         const historyItem = { ...currentQuestion, response: transcript };
@@ -360,89 +299,112 @@ export default function PublicInterviewRoom() {
     }
   
     try {
-      // Fetch the next question
       const response = await api.get(`/api/interviews/${sessionId}/next-question`, {
         params: { current: currentQuestion?.id },
       });
   
       if (response.data.isComplete) {
-        setStatus("complete"); // Mark interview as complete
+        setStatus("complete");
       } else {
-        setCurrentQuestion(response.data.question); // Set the next question
-        setTranscript(""); // Clear the transcript
-        await startRecording(); // Start recording for the next question
+        setCurrentQuestion(response.data.question);
+        setTranscript("");
+        await startRecording();
       }
     } catch (err) {
       console.error("Failed to get next question:", err);
       setError("Could not load the next question. Please try again.");
     }
   };
-  
   return (
     <div className="container-fluid vh-100 bg-light p-3">
       <div className="row h-100">
+        {/* Left Column - Video and Instructions */}
         <div className="col-6">
+          {/* Video Section */}
           <div className="row mb-3" style={{ height: "48%" }}>
             <div className="col">
               <div className="card h-100">
                 <div className="card-body p-0 d-flex align-items-center justify-content-center bg-dark rounded">
-                  <video
-                    ref={videoRef}
-                    autoPlay
-                    playsInline
-                    muted
-                    className="w-100 h-100 object-fit-cover"
-                  />
+                  {hasVideo ? (
+                    <video
+                      ref={videoRef}
+                      autoPlay
+                      playsInline
+                      muted
+                      className="w-100 h-100 object-fit-cover"
+                    />
+                  ) : (
+                    <div className="text-white">No video available</div>
+                  )}
                 </div>
               </div>
             </div>
           </div>
 
+          {/* Instructions Panel */}
           <div className="row" style={{ height: "48%" }}>
             <div className="col">
               <div className="card h-100">
                 <div className="card-body">
-                  <h5 className="card-title">Interview Progress</h5>
-                  {analysis && (
-                    <div className="analysis-section mt-3">
-                      <h6>Response Analysis</h6>
-                      <div className="analysis-content">
-                        <p><strong>Score:</strong> {analysis.score}/10</p>
-                        {analysis.strengths?.length > 0 && (
-                          <div className="mb-2">
-                            <strong>Strengths:</strong>
-                            <ul className="mb-0">
-                              {analysis.strengths.map((s, i) => (
-                                <li key={i}>{s}</li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
-                        {analysis.areas_for_improvement?.length > 0 && (
-                          <div>
-                            <strong>Areas for Improvement:</strong>
-                            <ul className="mb-0">
-                              {analysis.areas_for_improvement.map((a, i) => (
-                                <li key={i}>{a}</li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
+                  <h5 className="card-title">Instructions Panel</h5>
+                  
+                  {/* Audio Volume Indicator */}
+                  {volume > 0 && (
+                    <div className="mb-3">
+                      <div className="progress" style={{ height: "4px" }}>
+                        <div
+                          className="progress-bar bg-primary"
+                          style={{
+                            width: `${Math.min(100, (volume / 255) * 100)}%`,
+                          }}
+                        />
                       </div>
                     </div>
                   )}
+
+                  {/* Alerts and Warnings */}
                   <div className="instruction-content">
+                    {/* Volume Warning */}
                     {volume < 50 && isRecording && (
                       <div className="alert alert-warning d-flex align-items-center py-2">
                         <i className="bi bi-volume-up me-2"></i>
                         Please speak louder
                       </div>
                     )}
+
+                    {/* Fraud Detection Alerts */}
+                    {fraudAlerts.map((alert, index) => (
+                      <div key={index} className="alert alert-danger d-flex align-items-center py-2 mb-2">
+                        <i className="bi bi-exclamation-triangle-fill me-2"></i>
+                        {alert}
+                      </div>
+                    ))}
+
+                    {/* General Error */}
                     {error && (
                       <div className="alert alert-danger" role="alert">
                         {error}
                       </div>
                     )}
+
+                    {/* Recording Status */}
+                    {isRecording && (
+                      <div className="alert alert-info d-flex align-items-center py-2">
+                        <i className="bi bi-record-circle me-2"></i>
+                        Recording in progress
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Interview Guidelines */}
+                  <div className="mt-3">
+                    <h6 className="text-muted">Guidelines:</h6>
+                    <ul className="small text-muted">
+                      <li>Ensure your face is clearly visible</li>
+                      <li>Stay centered in the frame</li>
+                      <li>Maintain good lighting</li>
+                      <li>Speak clearly into your microphone</li>
+                    </ul>
                   </div>
                 </div>
               </div>
@@ -450,6 +412,7 @@ export default function PublicInterviewRoom() {
           </div>
         </div>
 
+        {/* Right Column - Q&A Section */}
         <div className="col-6">
           <QnASection
             status={status}
@@ -459,18 +422,10 @@ export default function PublicInterviewRoom() {
             questionHistory={questionHistory}
             isRecording={isRecording}
             onStartInterview={startInterview}
-            onStartInterview={startInterview}
             onNextQuestion={handleNextQuestion}
           />
         </div>
       </div>
-
-      {/* Error Messages */}
-      {error && (
-        <div className="position-fixed bottom-0 start-50 translate-middle-x mb-4">
-          <div className="alert alert-danger">{error}</div>
-        </div>
-      )}
     </div>
-);
+  );
 }
