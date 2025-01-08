@@ -1,7 +1,9 @@
+// frontend/src/pages/PublicInterviewRoom.js - Logic Part
+
 import React, { useState, useEffect, useRef } from "react";
 import { useParams } from "react-router-dom";
-import api from '../services/api';
-import QnASection from '../components/QnASection';
+import api from "../services/api";
+import QnASection from "../components/QnASection";
 
 export default function PublicInterviewRoom() {
   // State Management
@@ -13,134 +15,147 @@ export default function PublicInterviewRoom() {
   const [hasVideo, setHasVideo] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [volume, setVolume] = useState(0);
-  const [recognitionActive, setRecognitionActive] = useState(false);
   const [questionHistory, setQuestionHistory] = useState([]);
   const [fraudAlerts, setFraudAlerts] = useState([]);
+  const [assemblyToken, setAssemblyToken] = useState(null);
+  const [assemblyReady, setAssemblyReady] = useState(false);
 
   // Refs
   const videoRef = useRef(null);
-  const mediaRecorderRef = useRef(null);
   const streamRef = useRef(null);
   const audioContextRef = useRef(null);
   const analyserRef = useRef(null);
-  const recognitionRef = useRef(null);
+  const webSocketRef = useRef(null);
   const fraudDetectionIntervalRef = useRef(null);
+  const processorRef = useRef(null);
 
   const { sessionId } = useParams();
 
-  // Cleanup Effect
-  useEffect(() => {
-    initializeInterview();
-    return () => cleanupMedia();
-  }, []);
-
-  // Audio Volume Effect
-  useEffect(() => {
-    if (isRecording) {
-      const interval = setInterval(checkAudioVolume, 100);
-      return () => clearInterval(interval);
-    }
-  }, [isRecording]);
-
-  // Speech Recognition Setup
-  const setupSpeechRecognition = () => {
-    if ("webkitSpeechRecognition" in window) {
-      recognitionRef.current = new window.webkitSpeechRecognition();
-      recognitionRef.current.continuous = true;
-      recognitionRef.current.interimResults = true;
-  
-      recognitionRef.current.onresult = (event) => {
-        let finalTranscript = "";
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          if (event.results[i].isFinal) {
-            finalTranscript += event.results[i][0].transcript + " ";
-          }
-        }
-        if (finalTranscript) {
-          setTranscript((prev) => prev + finalTranscript);
-        }
-      };
-  
-      recognitionRef.current.onerror = (event) => {
-        console.error("Speech recognition error:", event.error);
-        if (recognitionActive) {
-          try {
-            recognitionRef.current.start();
-          } catch (err) {
-            console.log("Recognition restart error:", err);
-          }
-        }
-      };
-  
-      recognitionRef.current.onend = () => {
-        if (recognitionActive) {
-          try {
-            recognitionRef.current.start();
-          } catch (err) {
-            console.log("Recognition restart error:", err);
-          }
-        }
-      };
-    } else {
-      console.error("Speech recognition is not supported in this browser.");
+  // Initialize AssemblyAI
+  const initializeAssemblyAI = async () => {
+    try {
+      const response = await api.post("/api/public/transcription-token");
+      setAssemblyToken(response.data.token);
+      console.log("AssemblyAI token received");
+    } catch (err) {
+      console.error("Failed to get AssemblyAI token:", err);
+      setError("Failed to initialize speech recognition");
     }
   };
 
+  // Connect to AssemblyAI WebSocket
+  const connectWebSocket = () => {
+    if (!assemblyToken) {
+      console.error("No AssemblyAI token available");
+      return;
+    }
+    try {
+      const socket = new WebSocket(
+        `wss://api.assemblyai.com/v2/realtime/ws?token=${assemblyToken}`
+      );
+
+      socket.onmessage = (message) => {
+        try {
+          const data = JSON.parse(message.data);
+          if (data.message_type === "FinalTranscript") {
+            setTranscript((prev) => prev + " " + data.text);
+          }
+        } catch (error) {
+          console.error("Error parsing WebSocket message:", error);
+        }
+      };
+
+      socket.onerror = (error) => {
+        console.error("WebSocket error:", error);
+        setAssemblyReady(false);
+      };
+
+      socket.onclose = () => {
+        console.log("WebSocket closed");
+        setAssemblyReady(false);
+      };
+
+      socket.onopen = () => {
+        console.log("AssemblyAI WebSocket connected");
+        setAssemblyReady(true);
+        socket.send(
+          JSON.stringify({
+            sample_rate: 44100,
+            audio_format: "pcm_s16le",
+            language_code: "en_us",
+          })
+        );
+      };
+
+      webSocketRef.current = socket;
+    } catch (error) {
+      console.error("WebSocket connection error:", error);
+    }
+  };
   // Interview Initialization
   const initializeInterview = async () => {
     try {
+      await initializeAssemblyAI();
+
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 15 } },
-        audio: true
+        video: {
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          frameRate: { ideal: 15 },
+        },
+        audio: true,
       });
-  
+
       streamRef.current = stream;
       setHasVideo(true);
-  
+
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
       }
-  
+
       // Audio Analysis Setup
       if (stream.getAudioTracks().length > 0) {
-        audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
+        audioContextRef.current = new (window.AudioContext ||
+          window.webkitAudioContext)();
         analyserRef.current = audioContextRef.current.createAnalyser();
         const source = audioContextRef.current.createMediaStreamSource(stream);
+
+        // Create processor for AssemblyAI
+        processorRef.current = audioContextRef.current.createScriptProcessor(
+          2048,
+          1,
+          1
+        );
+        source.connect(processorRef.current);
+        processorRef.current.connect(audioContextRef.current.destination);
+
+        // Handle audio processing for AssemblyAI
+        processorRef.current.onaudioprocess = (e) => {
+          if (
+            isRecording &&
+            webSocketRef.current?.readyState === WebSocket.OPEN
+          ) {
+            const float32Array = e.inputBuffer.getChannelData(0);
+            const int16Array = new Int16Array(float32Array.length);
+            for (let i = 0; i < float32Array.length; i++) {
+              int16Array[i] = float32Array[i] * 0x7fff;
+            }
+            webSocketRef.current.send(int16Array.buffer);
+          }
+        };
+
         source.connect(analyserRef.current);
       }
-  
-      mediaRecorderRef.current = new MediaRecorder(stream);
-      mediaRecorderRef.current.ondataavailable = handleDataAvailable;
-  
-      if ("webkitSpeechRecognition" in window) {
-        setupSpeechRecognition();
-      }
-  
+
       setStatus("ready");
     } catch (err) {
       console.error("Interview initialization error:", err);
-      setError("Could not access your camera or microphone. Please check your device settings.");
+      setError(
+        "Could not access your camera or microphone. Please check your device settings."
+      );
       setStatus("error");
     }
-  };
-
-  // Cleanup Function
-  const cleanupMedia = () => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-    }
-    if (audioContextRef.current?.state !== "closed") {
-      audioContextRef.current?.close();
-    }
-    if (recognitionRef.current) {
-      try {
-        recognitionRef.current.stop();
-      } catch (err) {
-        console.log("Recognition cleanup error:", err);
-      }
-    }
-    stopFraudDetection();
   };
 
   // Audio Volume Check
@@ -158,84 +173,40 @@ export default function PublicInterviewRoom() {
     try {
       setIsRecording(true);
       setStatus("recording");
-      setRecognitionActive(true);
-
-      if (mediaRecorderRef.current?.state !== "recording") {
-        mediaRecorderRef.current?.start(1000);
-      }
-
-      if (recognitionRef.current) {
-        try {
-          await recognitionRef.current.start();
-        } catch (err) {
-          console.log("Recognition already started:", err);
-        }
-      }
-
+      connectWebSocket();
       startFraudDetection();
     } catch (err) {
       console.error("Error starting recording:", err);
-      setError("Failed to start recording. Please refresh and try again.");
+      setError("Failed to start recording");
     }
   };
 
   const stopRecording = async () => {
     try {
-      setRecognitionActive(false);
-      if (mediaRecorderRef.current?.state === "recording") {
-        mediaRecorderRef.current.stop();
-      }
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.stop();
-        } catch (err) {
-          console.log("Recognition stop error:", err);
-        }
-      }
       setIsRecording(false);
+
+      if (webSocketRef.current) {
+        webSocketRef.current.close();
+        webSocketRef.current = null;
+      }
+
       stopFraudDetection();
+
+      // Submit the final transcript
+      if (transcript.trim()) {
+        await api.post(`/api/public/interviews/${sessionId}/answer`, {
+          transcript: transcript.trim(),
+          questionId: currentQuestion?.id,
+        });
+      }
     } catch (err) {
       console.error("Error stopping recording:", err);
     }
   };
 
-  // Fraud Detection
+  // Fraud Detection Methods
   const startFraudDetection = () => {
-    if (hasVideo && videoRef.current) {
-      fraudDetectionIntervalRef.current = setInterval(async () => {
-        try {
-          const canvas = document.createElement("canvas");
-          const context = canvas.getContext("2d");
-          canvas.width = videoRef.current.videoWidth;
-          canvas.height = videoRef.current.videoHeight;
-          context.drawImage(videoRef.current, 0, 0);
-
-          canvas.toBlob(async (blob) => {
-            const formData = new FormData();
-            formData.append("frame", blob);
-            formData.append("sessionId", sessionId);
-            formData.append("timestamp", Date.now().toString());
-
-            try {
-              const response = await api.post("/fraud-detection", formData);
-              
-              // Handle fraud detection response
-              if (response.data.analysis.metrics.warnings.length > 0) {
-                setFraudAlerts(response.data.analysis.metrics.warnings);
-              } else {
-                setFraudAlerts([]);
-              }
-
-            } catch (err) {
-              console.error("Fraud detection error:", err);
-              setFraudAlerts(["Unable to verify video integrity"]);
-            }
-          }, "image/jpeg", 0.8);
-        } catch (err) {
-          console.error("Frame capture error:", err);
-        }
-      }, 5000);
-    }
+    return;
   };
 
   const stopFraudDetection = () => {
@@ -244,77 +215,118 @@ export default function PublicInterviewRoom() {
     }
   };
 
-  // Data Handling
-  const handleDataAvailable = async (event) => {
-    if (event.data.size > 0) {
-      try {
-        const formData = new FormData();
-        formData.append("audio", event.data);
-        formData.append("sessionId", sessionId);
-        formData.append("questionId", currentQuestion?.id);
-        formData.append("transcript", transcript);
-
-        await api.post(`/api/interviews/${sessionId}/answer`, formData);
-      } catch (err) {
-        console.error("Answer submission error:", err);
-      }
-    }
-  };
-
   // Interview Flow Controls
   const startInterview = async () => {
     try {
-      const response = await api.get(`/api/interviews/${sessionId}/questions`);
-      
+      const response = await api.get(
+        `/api/public/interviews/${sessionId}/questions`
+      );
+
       if (!response.data.questions?.length) {
-        throw new Error('No questions received');
+        throw new Error("No questions received");
       }
-      
+
       setQuestions(response.data.questions);
       setCurrentQuestion(response.data.questions[0]);
       await startRecording();
     } catch (err) {
-      console.error('Failed to start interview:', err);
-      setError('Could not start the interview. Please try again.');
+      console.error("Failed to start interview:", err);
+      setError("Could not start the interview. Please try again.");
     }
   };
 
   const handleNextQuestion = async () => {
-    await stopRecording();
-  
-    if (currentQuestion) {
-      setQuestionHistory(prev => {
-        const updatedHistory = [...prev];
-        const existingIndex = updatedHistory.findIndex(q => q.id === currentQuestion.id);
-        const historyItem = { ...currentQuestion, response: transcript };
-  
-        if (existingIndex >= 0) {
-          updatedHistory[existingIndex] = historyItem;
-        } else {
-          updatedHistory.push(historyItem);
-        }
-  
-        return updatedHistory;
-      });
+    await stopRecording(); // Stop the current recording
+
+    // Submit current answer/transcript
+    if (transcript.trim()) {
+      try {
+        await api.post(`/api/public/interviews/${sessionId}/answer`, {
+          transcript: transcript.trim(),
+          questionId: currentQuestion?.id,
+        });
+      } catch (err) {
+        console.error("Failed to submit answer:", err);
+        // Continue anyway - don't block the interview progress
+      }
     }
-  
+
+    // Update question history
+    if (currentQuestion) {
+      setQuestionHistory((prev) => [
+        ...prev,
+        {
+          ...currentQuestion,
+          response: transcript,
+        },
+      ]);
+    }
+
     try {
-      const response = await api.get(`/api/interviews/${sessionId}/next-question`, {
-        params: { current: currentQuestion?.id },
-      });
-  
+      // Get next question
+      const response = await api.get(
+        `/api/public/interviews/${sessionId}/next-question`,
+        {
+          params: {
+            current: currentQuestion?.id,
+          },
+        }
+      );
+
+      // Handle interview completion
       if (response.data.isComplete) {
         setStatus("complete");
-      } else {
-        setCurrentQuestion(response.data.question);
-        setTranscript("");
-        await startRecording();
+        cleanupMedia(); // Make sure to clean up media resources
+        return;
+      }
+
+      // Set up next question
+      setCurrentQuestion(response.data.question);
+      setTranscript(""); // Clear transcript for new question
+
+      try {
+        await startRecording(); // Start recording for new question
+      } catch (recordingError) {
+        console.error("Failed to start recording:", recordingError);
+        setError("Failed to start recording. Please refresh and try again.");
       }
     } catch (err) {
       console.error("Failed to get next question:", err);
-      setError("Could not load the next question. Please try again.");
+      setError("Could not load next question. Please try again.");
     }
   };
+
+  // Cleanup
+  const cleanupMedia = () => {
+    if (webSocketRef.current) {
+      webSocketRef.current.close();
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+    }
+    if (audioContextRef.current?.state !== "closed") {
+      audioContextRef.current?.close();
+    }
+    if (processorRef.current) {
+      processorRef.current.disconnect();
+    }
+    stopFraudDetection();
+  };
+
+  // Effects
+  useEffect(() => {
+    initializeInterview();
+    return () => cleanupMedia();
+  }, []);
+
+  useEffect(() => {
+    if (isRecording) {
+      const interval = setInterval(checkAudioVolume, 100);
+      return () => clearInterval(interval);
+    }
+  }, [isRecording]);
+
+  // Render
   return (
     <div className="container-fluid vh-100 bg-light p-3">
       <div className="row h-100">
@@ -347,7 +359,7 @@ export default function PublicInterviewRoom() {
               <div className="card h-100">
                 <div className="card-body">
                   <h5 className="card-title">Instructions Panel</h5>
-                  
+
                   {/* Audio Volume Indicator */}
                   {volume > 0 && (
                     <div className="mb-3">
@@ -374,7 +386,10 @@ export default function PublicInterviewRoom() {
 
                     {/* Fraud Detection Alerts */}
                     {fraudAlerts.map((alert, index) => (
-                      <div key={index} className="alert alert-danger d-flex align-items-center py-2 mb-2">
+                      <div
+                        key={index}
+                        className="alert alert-danger d-flex align-items-center py-2 mb-2"
+                      >
                         <i className="bi bi-exclamation-triangle-fill me-2"></i>
                         {alert}
                       </div>
@@ -394,6 +409,15 @@ export default function PublicInterviewRoom() {
                         Recording in progress
                       </div>
                     )}
+
+                    {/* AssemblyAI Connection Status */}
+                    {isRecording &&
+                      webSocketRef.current?.readyState === WebSocket.OPEN && (
+                        <div className="alert alert-success d-flex align-items-center py-2">
+                          <i className="bi bi-mic-fill me-2"></i>
+                          Speech recognition active
+                        </div>
+                      )}
                   </div>
 
                   {/* Interview Guidelines */}
@@ -404,6 +428,11 @@ export default function PublicInterviewRoom() {
                       <li>Stay centered in the frame</li>
                       <li>Maintain good lighting</li>
                       <li>Speak clearly into your microphone</li>
+                      {isRecording && (
+                        <li className="text-success">
+                          Your speech is being transcribed automatically
+                        </li>
+                      )}
                     </ul>
                   </div>
                 </div>
@@ -414,18 +443,59 @@ export default function PublicInterviewRoom() {
 
         {/* Right Column - Q&A Section */}
         <div className="col-6">
-          <QnASection
-            status={status}
-            currentQuestion={currentQuestion}
-            questions={questions}
-            transcript={transcript}
-            questionHistory={questionHistory}
-            isRecording={isRecording}
-            onStartInterview={startInterview}
-            onNextQuestion={handleNextQuestion}
-          />
+          <div className="card">
+            <div className="card-body d-flex flex-column">
+              <QnASection
+                status={status}
+                currentQuestion={currentQuestion}
+                questions={questions}
+                transcript={transcript}
+                questionHistory={questionHistory}
+                isRecording={isRecording}
+                onStartInterview={startInterview}
+                onNextQuestion={handleNextQuestion}
+              />
+            </div>
+          </div>
         </div>
       </div>
+
+      {/* Connection Status Modal */}
+      {isRecording && error && (
+        <div
+          className="modal fade show d-block"
+          style={{ backgroundColor: "rgba(0,0,0,0.5)" }}
+        >
+          <div className="modal-dialog modal-dialog-centered">
+            <div className="modal-content">
+              <div className="modal-header">
+                <h5 className="modal-title">Connection Issue</h5>
+              </div>
+              <div className="modal-body">
+                <p>{error}</p>
+                <p>Please ensure you have a stable internet connection.</p>
+              </div>
+              <div className="modal-footer">
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => setError(null)}
+                >
+                  Dismiss
+                </button>
+                <button
+                  className="btn btn-primary"
+                  onClick={() => {
+                    setError(null);
+                    startRecording();
+                  }}
+                >
+                  Retry Connection
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -57,7 +57,10 @@ const QnASection = ({
 
   const renderRecordingState = () => (
     <>
-      <div className="flex-grow-1 overflow-auto mb-3">
+      <div 
+        className="flex-grow-1 overflow-auto mb-3"
+        style={{ maxHeight: '500px', overflowY: 'auto' }} // Added styling for scrolling
+      >
         {questions
           .slice(0, getCurrentQuestionIndex() + 1)
           .map(renderQuestion)}
@@ -97,7 +100,7 @@ const QnASection = ({
   );
 
   return (
-    <div className="card h-30">
+    <div className="card" style={{ height: '600px', overflow: 'hidden' }}> {/* Fixed height */}
       <div className="card-body d-flex flex-column">
         {status === 'ready' && renderReadyState()}
         {status === 'recording' && renderRecordingState()}
