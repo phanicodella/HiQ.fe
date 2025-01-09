@@ -144,53 +144,74 @@ const startInterview = async () => {
     setError("Could not start the interview. Please try again.");
   }
 };
-  const handleNextQuestion = async () => {
-    await stopRecording();
+const handleNextQuestion = async () => {
+  await stopRecording();
 
-    if (transcript.trim()) {
-      try {
-        await api.post(`/api/public/interviews/${sessionId}/answer`, {
-          transcript: transcript.trim(),
-          questionId: currentQuestion?.id,
-        });
-      } catch (err) {
-        console.error("Failed to submit answer:", err);
-      }
-    }
-
-    if (currentQuestion) {
-      setQuestionHistory((prev) => [
-        ...prev,
-        {
-          ...currentQuestion,
-          response: transcript,
-        },
-      ]);
-    }
-
+  if (transcript.trim()) {
     try {
-      const response = await api.get(
-        `/api/public/interviews/${sessionId}/next-question`,
-        {
-          params: { current: currentQuestion?.id }
-        }
-      );
+      // Submit the answer
+      await api.post(`/api/public/interviews/${sessionId}/answer`, {
+        transcript: transcript.trim(),
+        questionId: currentQuestion?.id,
+      });
 
-      if (response.data.isComplete) {
-        setStatus("complete");
-        cleanupMedia();
-        return;
+      // Analyze the answer
+      const analysis = await api.post(`/api/public/interviews/${sessionId}/analyze-answer`, {
+        question: currentQuestion?.text,
+        answer: transcript.trim()
+      });
+
+      console.log('Answer analysis:', analysis.data);
+
+      // Store in question history
+      if (currentQuestion) {
+        setQuestionHistory((prev) => [
+          ...prev,
+          {
+            ...currentQuestion,
+            response: transcript,
+            analysis: analysis.data.analysis
+          },
+        ]);
       }
 
-      setCurrentQuestion(response.data.question);
-      setTranscript("");
-
-      await startRecording();
     } catch (err) {
-      console.error("Failed to get next question:", err);
-      setError("Could not load next question. Please try again.");
+      console.error("Failed to process answer:", err);
     }
-  };
+  }
+
+  try {
+    const response = await api.get(
+      `/api/public/interviews/${sessionId}/next-question`,
+      {
+        params: { current: currentQuestion?.id }
+      }
+    );
+
+    if (response.data.isComplete) {
+      setStatus("complete");
+      cleanupMedia();
+      
+      // Send final analysis if interview is complete
+      try {
+        await api.post(`/api/public/interviews/${sessionId}/complete`, {
+          questionHistory: questionHistory
+        });
+      } catch (analysisError) {
+        console.error("Failed to send final analysis:", analysisError);
+      }
+      return;
+    }
+
+    setCurrentQuestion(response.data.question);
+    setTranscript("");
+
+    await startRecording();
+  } catch (err) {
+    console.error("Failed to get next question:", err);
+    setError("Could not load next question. Please try again.");
+  }
+};
 
   const cleanupMedia = () => {
     if (webSocketRef.current) {
