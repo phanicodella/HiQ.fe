@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { useParams } from "react-router-dom";
 import api from "../services/api";
 import QnASection from "../components/QnASection";
-import TranscriptionHandler from "../components/TranscriptionHandler";
+import AzureSpeechRecognition from "../components/AzureSpeechRecognition";
 import AudioProcessor from "../components/AudioProcessor";
 
 export default function PublicInterviewRoom() {
@@ -28,6 +28,19 @@ export default function PublicInterviewRoom() {
   const processorRef = useRef(null);
 
   const { sessionId } = useParams();
+
+  // Add Azure Speech handlers
+  const handleTranscriptionUpdate = (newTranscript) => {
+    setTranscript(newTranscript);
+  };
+
+  const handleSpeechError = (error) => {
+    console.error("Speech recognition error:", error);
+    setError(error);
+    if (isRecording) {
+      stopRecording();
+    }
+  };
 
   const initializeInterview = async () => {
     try {
@@ -114,24 +127,23 @@ export default function PublicInterviewRoom() {
       clearInterval(fraudDetectionIntervalRef.current);
     }
   };
+// Old working version in PublicInterviewRoom.js
+const startInterview = async () => {
+  try {
+    const response = await api.get(`/api/public/interviews/${sessionId}/questions`);
 
-  const startInterview = async () => {
-    try {
-      const response = await api.get(`/api/public/interviews/${sessionId}/questions`);
-
-      if (!response.data.questions?.length) {
-        throw new Error("No questions received");
-      }
-
-      setQuestions(response.data.questions);
-      setCurrentQuestion(response.data.questions[0]);
-      await startRecording();
-    } catch (err) {
-      console.error("Failed to start interview:", err);
-      setError("Could not start the interview. Please try again.");
+    if (!response.data.questions?.length) {
+      throw new Error("No questions received");
     }
-  };
 
+    setQuestions(response.data.questions);
+    setCurrentQuestion(response.data.questions[0]);
+    await startRecording();
+  } catch (err) {
+    console.error("Failed to start interview:", err);
+    setError("Could not start the interview. Please try again.");
+  }
+};
   const handleNextQuestion = async () => {
     await stopRecording();
 
@@ -208,8 +220,8 @@ export default function PublicInterviewRoom() {
     }
   }, [isRecording]);
 
-  // Render
-  return (
+
+ return (
     <div className="container-fluid vh-100 bg-light p-3">
       <div className="row h-100">
         <div className="col-6">
@@ -228,11 +240,10 @@ export default function PublicInterviewRoom() {
                   ) : (
                     <div className="text-white">No video available</div>
                   )}
-                  <TranscriptionHandler
-                    sessionId={sessionId}
-                    currentQuestionId={currentQuestion?.id}
+                  <AzureSpeechRecognition
                     isRecording={isRecording}
-                    onTranscriptionUpdate={(text) => setTranscript(text)}
+                    onTranscriptionUpdate={handleTranscriptionUpdate}
+                    onError={handleSpeechError}
                   />
                   <AudioProcessor
                     isRecording={isRecording}
@@ -382,3 +393,4 @@ export default function PublicInterviewRoom() {
     </div>
   );
 }
+
