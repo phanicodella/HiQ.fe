@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { Resend } from 'resend';
 import api from '../services/api';
 
 export function AccessRequestForm() {
@@ -70,24 +69,9 @@ export function AccessRequestForm() {
 
     try {
       // Send access request to backend
-      await api.post('/api/access/request', formData);
-
-      // Send notification email using Resend
-      const resend = new Resend(process.env.REACT_APP_RESEND_API_KEY);
-      await resend.emails.send({
-        from: 'HiQ AI <hr@talentsync.tech>',
-        to: 'getHiQaccess@talentsync.tech',
-        subject: 'New Platform Access Request',
-        html: `
-          <div>
-            <h2>New HiQ AI Platform Access Request</h2>
-            <p><strong>Work Domain:</strong> ${formData.workDomain}</p>
-            <p><strong>Email:</strong> ${formData.email}</p>
-            <p><strong>Team Size:</strong> ${formData.teamSize || 'Not specified'}</p>
-            <p><strong>Additional Message:</strong></p>
-            <p>${formData.message || 'No additional message'}</p>
-          </div>
-        `
+      await api.post('/api/access/request', {
+        ...formData,
+        email: formData.email.toLowerCase()
       });
 
       setSubmitted(true);
