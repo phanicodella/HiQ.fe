@@ -7,8 +7,7 @@ const ensureTrailingSlash = (url) => url.endsWith('/') ? url : `${url}/`;
 
 // Determine the base URL
 const getBaseUrl = () => {
-  const baseUrl = process.env.REACT_APP_API_URL || 'http://localhost:3000';
-  return ensureTrailingSlash(baseUrl);
+  return process.env.REACT_APP_API_URL || 'https://hiq-be.onrender.com';
 };
 
 const api = axios.create({
