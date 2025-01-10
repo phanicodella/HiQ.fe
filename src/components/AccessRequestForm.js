@@ -64,20 +64,43 @@ export function AccessRequestForm() {
       return;
     }
 
+    // Validate work domain
+    if (!formData.workDomain.trim()) {
+      setError('Work domain is required');
+      return;
+    }
+
     setIsSubmitting(true);
     setError('');
 
     try {
+      const payload = {
+        workDomain: formData.workDomain.trim(),
+        email: formData.email.toLowerCase().trim(),
+        teamSize: formData.teamSize || undefined,
+        message: formData.message || undefined
+      };
+
       // Send access request to backend
-      await api.post('/api/access/request', {
-        ...formData,
-        email: formData.email.toLowerCase()
+      const response = await api.post('/api/access/request', payload, {
+        headers: {
+          'Content-Type': 'application/json'
+        }
       });
 
-      setSubmitted(true);
+      if (response.data) {
+        setSubmitted(true);
+      } else {
+        throw new Error('No response received');
+      }
     } catch (err) {
       console.error('Access request error:', err);
-      setError(err.response?.data?.error || 'Failed to submit request. Please try again.');
+      setError(
+        err.response?.data?.error || 
+        err.response?.data?.details || 
+        err.message || 
+        'Failed to submit request. Please try again.'
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -130,7 +153,7 @@ export function AccessRequestForm() {
           <form onSubmit={handleSubmit} className="space-y-6">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Work Domain
+                Company's website
               </label>
               <input 
                 type="text" 
@@ -139,7 +162,7 @@ export function AccessRequestForm() {
                 onChange={handleChange}
                 required 
                 placeholder="Enter your company domain (e.g., talentsync.tech)"
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 transition duration-300 ease-in-out transform hover:shadow-sm"
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 transition duration-300 ease-in-out transform hover:shadow-sm text-gray-900"
                 autoComplete="off"
               />
             </div>
@@ -155,7 +178,7 @@ export function AccessRequestForm() {
                 onChange={handleChange}
                 required 
                 placeholder="Enter your work email"
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 transition duration-300 ease-in-out transform hover:shadow-sm"
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 transition duration-300 ease-in-out transform hover:shadow-sm text-gray-900"
                 autoComplete="off"
               />
             </div>
@@ -170,7 +193,7 @@ export function AccessRequestForm() {
                 value={formData.teamSize}
                 onChange={handleChange}
                 placeholder="Number of employees (optional)"
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 transition duration-300 ease-in-out transform hover:shadow-sm"
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 transition duration-300 ease-in-out transform hover:shadow-sm text-gray-900"
                 autoComplete="off"
               />
             </div>
@@ -184,7 +207,7 @@ export function AccessRequestForm() {
                 value={formData.message}
                 onChange={handleChange}
                 placeholder="Tell us about your hiring needs"
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 transition duration-300 ease-in-out transform hover:shadow-sm"
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 transition duration-300 ease-in-out transform hover:shadow-sm text-gray-900"
                 rows="4"
               />
             </div>
