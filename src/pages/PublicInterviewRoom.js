@@ -6,8 +6,9 @@ import AzureSpeechRecognition from "../components/AzureSpeechRecognition";
 import AudioProcessor from "../components/AudioProcessor";
 
 export default function PublicInterviewRoom() {
+  // State Management
   const [status, setStatus] = useState("initializing");
-  const [currentQuestion, setCurrentQuestion] = useState(null);
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [questions, setQuestions] = useState([]);
   const [transcript, setTranscript] = useState("");
   const [error, setError] = useState(null);
@@ -16,9 +17,10 @@ export default function PublicInterviewRoom() {
   const [volume, setVolume] = useState(0);
   const [questionHistory, setQuestionHistory] = useState([]);
   const [fraudAlerts, setFraudAlerts] = useState([]);
-  const [assemblyToken, setAssemblyToken] = useState(null);
-  const [assemblyReady, setAssemblyReady] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [interviewComplete, setInterviewComplete] = useState(false);
 
+  // Refs
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const audioContextRef = useRef(null);
@@ -26,12 +28,14 @@ export default function PublicInterviewRoom() {
   const webSocketRef = useRef(null);
   const fraudDetectionIntervalRef = useRef(null);
   const processorRef = useRef(null);
+  const volumeCheckIntervalRef = useRef(null);
 
   const { sessionId } = useParams();
 
-  // Add Azure Speech handlers
   const handleTranscriptionUpdate = (newTranscript) => {
-    setTranscript(newTranscript);
+    if (!interviewComplete) {
+      setTranscript(newTranscript);
+    }
   };
 
   const handleSpeechError = (error) => {
@@ -81,7 +85,7 @@ export default function PublicInterviewRoom() {
   };
 
   const checkAudioVolume = () => {
-    if (analyserRef.current) {
+    if (analyserRef.current && !interviewComplete) {
       const array = new Uint8Array(analyserRef.current.frequencyBinCount);
       analyserRef.current.getByteFrequencyData(array);
       const average = array.reduce((a, b) => a + b) / array.length;
@@ -90,10 +94,18 @@ export default function PublicInterviewRoom() {
   };
 
   const startRecording = async () => {
+    if (interviewComplete) return;
+    
     try {
       setIsRecording(true);
       setStatus("recording");
       startFraudDetection();
+      
+      // Start volume checking
+      if (volumeCheckIntervalRef.current) {
+        clearInterval(volumeCheckIntervalRef.current);
+      }
+      volumeCheckIntervalRef.current = setInterval(checkAudioVolume, 100);
     } catch (err) {
       console.error("Error starting recording:", err);
       setError("Failed to start recording");
@@ -108,6 +120,11 @@ export default function PublicInterviewRoom() {
         webSocketRef.current = null;
       }
       stopFraudDetection();
+      
+      // Stop volume checking
+      if (volumeCheckIntervalRef.current) {
+        clearInterval(volumeCheckIntervalRef.current);
+      }
     } catch (err) {
       console.error("Error stopping recording:", err);
     }
@@ -119,6 +136,7 @@ export default function PublicInterviewRoom() {
     }
     fraudDetectionIntervalRef.current = setInterval(() => {
       // Implement fraud detection logic here
+      // For now, this is a placeholder
     }, 5000);
   };
 
@@ -127,92 +145,138 @@ export default function PublicInterviewRoom() {
       clearInterval(fraudDetectionIntervalRef.current);
     }
   };
-// Old working version in PublicInterviewRoom.js
-const startInterview = async () => {
-  try {
-    const response = await api.get(`/api/public/interviews/${sessionId}/questions`);
 
-    if (!response.data.questions?.length) {
-      throw new Error("No questions received");
-    }
-
-    setQuestions(response.data.questions);
-    setCurrentQuestion(response.data.questions[0]);
-    await startRecording();
-  } catch (err) {
-    console.error("Failed to start interview:", err);
-    setError("Could not start the interview. Please try again.");
-  }
-};
-const handleNextQuestion = async () => {
-  await stopRecording();
-
-  if (transcript.trim()) {
+  const startInterview = async () => {
     try {
-      // Submit the answer
-      await api.post(`/api/public/interviews/${sessionId}/answer`, {
-        transcript: transcript.trim(),
-        questionId: currentQuestion?.id,
-      });
+      const response = await api.get(`/api/public/interviews/${sessionId}/questions`);
 
-      // Analyze the answer
-      const analysis = await api.post(`/api/public/interviews/${sessionId}/analyze-answer`, {
-        question: currentQuestion?.text,
-        answer: transcript.trim()
-      });
-
-      console.log('Answer analysis:', analysis.data);
-
-      // Store in question history
-      if (currentQuestion) {
-        setQuestionHistory((prev) => [
-          ...prev,
-          {
-            ...currentQuestion,
-            response: transcript,
-            analysis: analysis.data.analysis
-          },
-        ]);
+      if (!response.data.questions?.length) {
+        throw new Error("No questions received");
       }
 
+      setQuestions(response.data.questions);
+      setCurrentQuestionIndex(0);
+      await startRecording();
     } catch (err) {
-      console.error("Failed to process answer:", err);
+      console.error("Failed to start interview:", err);
+      setError("Could not start the interview. Please try again.");
     }
-  }
+  };
 
-  try {
-    const response = await api.get(
-      `/api/public/interviews/${sessionId}/next-question`,
-      {
-        params: { current: currentQuestion?.id }
-      }
-    );
-
-    if (response.data.isComplete) {
-      setStatus("complete");
-      cleanupMedia();
+  // Old handleNextQuestion function
+  const handleNextQuestion = async () => {
+    if (isSubmitting || interviewComplete) return;
+  
+    try {
+      setIsSubmitting(true);
+      await stopRecording();
+  
+      const currentQuestion = questions[currentQuestionIndex];
       
-      // Send final analysis if interview is complete
-      try {
-        await api.post(`/api/public/interviews/${sessionId}/complete`, {
-          questionHistory: questionHistory
-        });
-      } catch (analysisError) {
-        console.error("Failed to send final analysis:", analysisError);
+      if (transcript.trim()) {
+        try {
+          // Just submit the answer without analysis
+          await api.post(`/api/public/interviews/${sessionId}/answer`, {
+            transcript: transcript.trim(),
+            questionId: currentQuestion?.id,
+          });
+  
+          // Store in question history without analysis
+          setQuestionHistory((prev) => [
+            ...prev,
+            {
+              ...currentQuestion,
+              response: transcript
+            },
+          ]);
+  
+        } catch (err) {
+          console.error("Failed to save answer:", err);
+          setError("Failed to save answer. Please try again.");
+          return;
+        }
       }
-      return;
+  
+      // Check if interview is complete
+      if (currentQuestionIndex >= questions.length - 1) {
+        await handleInterviewComplete();
+        return;
+      }
+  
+      // Move to next question
+      setCurrentQuestionIndex(prev => prev + 1);
+      setTranscript("");
+      
+      // Start recording for next question
+      try {
+        await startRecording();
+      } catch (err) {
+        console.error("Failed to start recording for next question:", err);
+        setError("Failed to start recording. Please refresh and try again.");
+      }
+  
+    } catch (err) {
+      console.error("Error handling next question:", err);
+      setError("Failed to process question. Please try again.");
+    } finally {
+      setIsSubmitting(false);
     }
+  };
 
-    setCurrentQuestion(response.data.question);
-    setTranscript("");
-
-    await startRecording();
-  } catch (err) {
-    console.error("Failed to get next question:", err);
-    setError("Could not load next question. Please try again.");
-  }
-};
-
+  const handleInterviewComplete = async () => {
+    try {
+      setIsSubmitting(true);
+  
+      // Save the final answer first
+      if (transcript.trim()) {
+        try {
+          await api.post(`/api/public/interviews/${sessionId}/answer`, {
+            transcript: transcript.trim(),
+            questionId: questions[currentQuestionIndex]?.id,
+          });
+  
+          // Add final answer to history
+          setQuestionHistory(prev => [
+            ...prev,
+            {
+              ...questions[currentQuestionIndex],
+              response: transcript
+            }
+          ]);
+        } catch (err) {
+          console.error("Failed to save final answer:", err);
+          setError("Failed to save your final answer. Please try again.");
+          setIsSubmitting(false);
+          return;
+        }
+      }
+  
+      // Prepare complete question history including the last answer
+      const finalQuestionHistory = [
+        ...questionHistory,
+        {
+          ...questions[currentQuestionIndex],
+          response: transcript
+        }
+      ];
+  
+      // Complete the interview with all answers
+      await api.post(`/api/public/interviews/${sessionId}/complete`, {
+        questionHistory: finalQuestionHistory
+      });
+  
+      // Clean up and update UI state
+      cleanupMedia();
+      setStatus("complete");
+      setInterviewComplete(true);
+      setIsSubmitting(false);
+  
+    } catch (err) {
+      console.error("Failed to complete interview:", err);
+      setError("Failed to complete interview. Please try again.");
+      setIsSubmitting(false);
+    }
+  };
   const cleanupMedia = () => {
     if (webSocketRef.current) {
       webSocketRef.current.close();
@@ -226,26 +290,38 @@ const handleNextQuestion = async () => {
     if (processorRef.current) {
       processorRef.current.disconnect();
     }
+    if (volumeCheckIntervalRef.current) {
+      clearInterval(volumeCheckIntervalRef.current);
+    }
     stopFraudDetection();
   };
 
+  // Initialize interview on mount
   useEffect(() => {
     initializeInterview();
     return () => cleanupMedia();
   }, []);
 
+  // Cleanup on unmount
   useEffect(() => {
-    if (isRecording) {
-      const interval = setInterval(checkAudioVolume, 100);
-      return () => clearInterval(interval);
-    }
+    return () => {
+      if (volumeCheckIntervalRef.current) {
+        clearInterval(volumeCheckIntervalRef.current);
+      }
+      if (fraudDetectionIntervalRef.current) {
+        clearInterval(fraudDetectionIntervalRef.current);
+      }
+    };
   }, [isRecording]);
 
+  // ... Previous logic code ...
 
- return (
+  return (
     <div className="container-fluid vh-100 bg-light p-3">
       <div className="row h-100">
+        {/* Video Feed & Instructions Column */}
         <div className="col-6">
+          {/* Video Feed Section */}
           <div className="row mb-3" style={{ height: "48%" }}>
             <div className="col">
               <div className="card h-100">
@@ -262,12 +338,12 @@ const handleNextQuestion = async () => {
                     <div className="text-white">No video available</div>
                   )}
                   <AzureSpeechRecognition
-                    isRecording={isRecording}
+                    isRecording={isRecording && !interviewComplete}
                     onTranscriptionUpdate={handleTranscriptionUpdate}
                     onError={handleSpeechError}
                   />
                   <AudioProcessor
-                    isRecording={isRecording}
+                    isRecording={isRecording && !interviewComplete}
                     onAudioData={(audioData) => {
                       if (webSocketRef.current?.readyState === WebSocket.OPEN) {
                         webSocketRef.current.send(audioData);
@@ -279,19 +355,22 @@ const handleNextQuestion = async () => {
             </div>
           </div>
 
+          {/* Instructions Panel */}
           <div className="row" style={{ height: "48%" }}>
             <div className="col">
               <div className="card h-100">
                 <div className="card-body">
                   <h5 className="card-title">Instructions Panel</h5>
 
-                  {volume > 0 && (
+                  {/* Audio Volume Indicator */}
+                  {isRecording && volume > 0 && (
                     <div className="mb-3">
                       <div className="progress" style={{ height: "4px" }}>
                         <div
                           className="progress-bar bg-primary"
                           style={{
                             width: `${Math.min(100, (volume / 255) * 100)}%`,
+                            transition: 'width 0.1s ease'
                           }}
                         />
                       </div>
@@ -299,13 +378,15 @@ const handleNextQuestion = async () => {
                   )}
 
                   <div className="instruction-content">
-                    {volume < 50 && isRecording && (
+                    {/* Volume Warning */}
+                    {isRecording && volume < 50 && (
                       <div className="alert alert-warning d-flex align-items-center py-2">
                         <i className="bi bi-volume-up me-2"></i>
                         Please speak louder
                       </div>
                     )}
 
+                    {/* Fraud Alerts */}
                     {fraudAlerts.map((alert, index) => (
                       <div
                         key={index}
@@ -316,28 +397,45 @@ const handleNextQuestion = async () => {
                       </div>
                     ))}
 
+                    {/* Error Display */}
                     {error && (
                       <div className="alert alert-danger" role="alert">
                         {error}
+                        <button 
+                          type="button" 
+                          className="btn-close float-end" 
+                          onClick={() => setError(null)}
+                          aria-label="Close"
+                        ></button>
                       </div>
                     )}
 
-                    {isRecording && (
+                    {/* Recording Status */}
+                    {isRecording && !interviewComplete && (
                       <div className="alert alert-info d-flex align-items-center py-2">
                         <i className="bi bi-record-circle me-2"></i>
                         Recording in progress
                       </div>
                     )}
 
-                    {isRecording &&
-                      webSocketRef.current?.readyState === WebSocket.OPEN && (
-                        <div className="alert alert-success d-flex align-items-center py-2">
-                          <i className="bi bi-mic-fill me-2"></i>
-                          Speech recognition active
-                        </div>
-                      )}
+                    {/* Speech Recognition Status */}
+                    {isRecording && !interviewComplete && webSocketRef.current?.readyState === WebSocket.OPEN && (
+                      <div className="alert alert-success d-flex align-items-center py-2">
+                        <i className="bi bi-mic-fill me-2"></i>
+                        Speech recognition active
+                      </div>
+                    )}
+
+                    {/* Interview Complete Status */}
+                    {interviewComplete && (
+                      <div className="alert alert-success d-flex align-items-center py-2">
+                        <i className="bi bi-check-circle-fill me-2"></i>
+                        Interview completed
+                      </div>
+                    )}
                   </div>
 
+                  {/* Guidelines */}
                   <div className="mt-3">
                     <h6 className="text-muted">Guidelines:</h6>
                     <ul className="small text-muted">
@@ -345,7 +443,7 @@ const handleNextQuestion = async () => {
                       <li>Stay centered in the frame</li>
                       <li>Maintain good lighting</li>
                       <li>Speak clearly into your microphone</li>
-                      {isRecording && (
+                      {isRecording && !interviewComplete && (
                         <li className="text-success">
                           Your speech is being transcribed automatically
                         </li>
@@ -358,25 +456,30 @@ const handleNextQuestion = async () => {
           </div>
         </div>
 
+        {/* QnA Section Column */}
         <div className="col-6">
-          <div className="card">
+          <div className="card h-100">
             <div className="card-body d-flex flex-column">
               <QnASection
                 status={status}
-                currentQuestion={currentQuestion}
+                currentQuestion={questions[currentQuestionIndex]}
                 questions={questions}
                 transcript={transcript}
                 questionHistory={questionHistory}
                 isRecording={isRecording}
+                isSubmitting={isSubmitting}
+                interviewComplete={interviewComplete}
                 onStartInterview={startInterview}
                 onNextQuestion={handleNextQuestion}
+                onComplete={handleInterviewComplete}
               />
             </div>
           </div>
         </div>
       </div>
 
-      {isRecording && error && (
+      {/* Error Modal */}
+      {isRecording && error && !interviewComplete && (
         <div
           className="modal fade show d-block"
           style={{ backgroundColor: "rgba(0,0,0,0.5)" }}
@@ -385,6 +488,12 @@ const handleNextQuestion = async () => {
             <div className="modal-content">
               <div className="modal-header">
                 <h5 className="modal-title">Connection Issue</h5>
+                <button 
+                  type="button" 
+                  className="btn-close" 
+                  onClick={() => setError(null)}
+                  aria-label="Close"
+                ></button>
               </div>
               <div className="modal-body">
                 <p>{error}</p>
@@ -414,4 +523,3 @@ const handleNextQuestion = async () => {
     </div>
   );
 }
-

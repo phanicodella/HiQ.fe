@@ -216,3 +216,50 @@
   border-radius: 0.5rem;
   margin-bottom: 1rem;
 }
+/* Add these styles to your existing Dashboard.css */
+
+.sortable-header {
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+  transition: background-color 0.2s;
+}
+
+.sortable-header:hover {
+  background-color: #f1f5f9;
+}
+
+.sortable-header::after {
+  display: inline-block;
+  margin-left: 5px;
+  opacity: 0.5;
+}
+
+.interviews-table th {
+  padding: 1rem;
+  background-color: #f9fafb;
+  color: #4b5563;
+  font-weight: 600;
+  font-size: 0.875rem;
+  text-align: left;
+  transition: all 0.2s;
+}
+
+/* Add hover effect for clickable headers */
+.interviews-table th:hover {
+  background-color: #f1f5f9;
+  color: #1d4ed8;
+}
+
+/* Style for sort indicators */
+.interviews-table th span {
+  margin-left: 0.5rem;
+  font-size: 0.75rem;
+  opacity: 0.5;
+}
+
+/* Active sort column */
+.interviews-table th.active {
+  color: #1d4ed8;
+  background-color: #eff6ff;
+}

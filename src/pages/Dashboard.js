@@ -1,7 +1,4 @@
-/* 
- * frontend/src/pages/Dashboard.js 
- */
-
+// frontend/src/pages/Dashboard.js
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
@@ -13,6 +10,10 @@ export function Dashboard() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showNewInterviewModal, setShowNewInterviewModal] = useState(false);
+  const [sortConfig, setSortConfig] = useState({
+    key: 'date',
+    direction: 'desc'
+  });
   
   const navigate = useNavigate();
 
@@ -34,9 +35,7 @@ export function Dashboard() {
     }
   };
 
-  /* 
-   * Calculate stats from interviews
-   */
+  // Calculate stats
   const stats = {
     total: interviews.length,
     scheduled: interviews.filter(i => i.status === 'scheduled').length,
@@ -44,9 +43,7 @@ export function Dashboard() {
     cancelled: interviews.filter(i => i.status === 'cancelled').length
   };
 
-  /* 
-   * Format date for display
-   */
+  // Format date
   const formatDate = (dateString) => {
     if (!dateString) return '—';
     try {
@@ -63,9 +60,7 @@ export function Dashboard() {
     }
   };
 
-  /* 
-   * Handle interview cancellation
-   */
+  // Handle interview cancellation
   const handleCancelInterview = async (id) => {
     if (!window.confirm('Are you sure you want to cancel this interview?')) {
       return;
@@ -78,6 +73,56 @@ export function Dashboard() {
       console.error('Error cancelling interview:', err);
       alert('Failed to cancel interview. Please try again.');
     }
+  };
+
+  // Sorting logic
+  const sortBy = (key) => {
+    let direction = 'asc';
+    if (sortConfig.key === key && sortConfig.direction === 'asc') {
+      direction = 'desc';
+    }
+    setSortConfig({ key, direction });
+  };
+
+  const getSortedInterviews = () => {
+    const sortedInterviews = [...interviews];
+    sortedInterviews.sort((a, b) => {
+      // Handle null or undefined values
+      if (!a[sortConfig.key] && !b[sortConfig.key]) return 0;
+      if (!a[sortConfig.key]) return 1;
+      if (!b[sortConfig.key]) return -1;
+
+      let comparison = 0;
+      switch (sortConfig.key) {
+        case 'candidateName':
+          comparison = a.candidateName.localeCompare(b.candidateName);
+          break;
+        case 'type':
+          comparison = a.type.localeCompare(b.type);
+          break;
+        case 'level':
+          comparison = a.level.localeCompare(b.level);
+          break;
+        case 'date':
+          comparison = new Date(a.date) - new Date(b.date);
+          break;
+        case 'status':
+          comparison = a.status.localeCompare(b.status);
+          break;
+        default:
+          comparison = 0;
+      }
+
+      return sortConfig.direction === 'asc' ? comparison : -comparison;
+    });
+
+    return sortedInterviews;
+  };
+
+  // Get sort indicator
+  const getSortIndicator = (key) => {
+    if (sortConfig.key !== key) return '↕️';
+    return sortConfig.direction === 'asc' ? '↑' : '↓';
   };
 
   if (isLoading) {
@@ -122,33 +167,40 @@ export function Dashboard() {
         </div>
       </div>
 
-      {/* Error Message */}
-      {error && (
-        <div className="error-message">{error}</div>
-      )}
+      {error && <div className="error-message">{error}</div>}
 
       {/* Interviews Table */}
       <div className="table-container">
         <table className="interviews-table">
           <thead>
             <tr>
-              <th>Candidate</th>
-              <th>Type</th>
-              <th>Level</th>
-              <th>Date & Time</th>
-              <th>Status</th>
+              <th onClick={() => sortBy('candidateName')} className="sortable-header">
+                Candidate {getSortIndicator('candidateName')}
+              </th>
+              <th onClick={() => sortBy('type')} className="sortable-header">
+                Type {getSortIndicator('type')}
+              </th>
+              <th onClick={() => sortBy('level')} className="sortable-header">
+                Level {getSortIndicator('level')}
+              </th>
+              <th onClick={() => sortBy('date')} className="sortable-header">
+                Date & Time {getSortIndicator('date')}
+              </th>
+              <th onClick={() => sortBy('status')} className="sortable-header">
+                Status {getSortIndicator('status')}
+              </th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {interviews.length === 0 ? (
+            {getSortedInterviews().length === 0 ? (
               <tr>
                 <td colSpan="6" className="empty-state">
                   No interviews found. Click "New Interview" to create one.
                 </td>
               </tr>
             ) : (
-              interviews.map((interview) => (
+              getSortedInterviews().map((interview) => (
                 <tr key={interview.id}>
                   <td>
                     <div className="candidate-info">
@@ -189,7 +241,6 @@ export function Dashboard() {
         </table>
       </div>
 
-      {/* New Interview Modal */}
       {showNewInterviewModal && (
         <NewInterviewModal 
           onClose={() => setShowNewInterviewModal(false)}
