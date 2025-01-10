@@ -1,12 +1,13 @@
+// frontend/src/pages/PublicInterviewRoom.js - Logic Part
 import React, { useState, useEffect, useRef } from "react";
 import { useParams } from "react-router-dom";
 import api from "../services/api";
 import QnASection from "../components/QnASection";
 import AzureSpeechRecognition from "../components/AzureSpeechRecognition";
 import AudioProcessor from "../components/AudioProcessor";
+import CompletionMessage from '../components/CompletionMessage';
 
 export default function PublicInterviewRoom() {
-  // State Management
   const [status, setStatus] = useState("initializing");
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [questions, setQuestions] = useState([]);
@@ -20,7 +21,6 @@ export default function PublicInterviewRoom() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [interviewComplete, setInterviewComplete] = useState(false);
 
-  // Refs
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const audioContextRef = useRef(null);
@@ -38,6 +38,10 @@ export default function PublicInterviewRoom() {
     }
   };
 
+  const handleClose = () => {
+    window.close(); // Close the browser window/tab
+  };
+
   const handleSpeechError = (error) => {
     console.error("Speech recognition error:", error);
     setError(error);
@@ -46,6 +50,7 @@ export default function PublicInterviewRoom() {
     }
   };
 
+  // Interview initialization and media handling
   const initializeInterview = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -101,7 +106,6 @@ export default function PublicInterviewRoom() {
       setStatus("recording");
       startFraudDetection();
       
-      // Start volume checking
       if (volumeCheckIntervalRef.current) {
         clearInterval(volumeCheckIntervalRef.current);
       }
@@ -121,7 +125,6 @@ export default function PublicInterviewRoom() {
       }
       stopFraudDetection();
       
-      // Stop volume checking
       if (volumeCheckIntervalRef.current) {
         clearInterval(volumeCheckIntervalRef.current);
       }
@@ -135,8 +138,7 @@ export default function PublicInterviewRoom() {
       clearInterval(fraudDetectionIntervalRef.current);
     }
     fraudDetectionIntervalRef.current = setInterval(() => {
-      // Implement fraud detection logic here
-      // For now, this is a placeholder
+      // Fraud detection logic here
     }, 5000);
   };
 
@@ -163,7 +165,6 @@ export default function PublicInterviewRoom() {
     }
   };
 
-  // Old handleNextQuestion function
   const handleNextQuestion = async () => {
     if (isSubmitting || interviewComplete) return;
   
@@ -175,13 +176,11 @@ export default function PublicInterviewRoom() {
       
       if (transcript.trim()) {
         try {
-          // Just submit the answer without analysis
           await api.post(`/api/public/interviews/${sessionId}/answer`, {
             transcript: transcript.trim(),
             questionId: currentQuestion?.id,
           });
   
-          // Store in question history without analysis
           setQuestionHistory((prev) => [
             ...prev,
             {
@@ -197,17 +196,14 @@ export default function PublicInterviewRoom() {
         }
       }
   
-      // Check if interview is complete
       if (currentQuestionIndex >= questions.length - 1) {
         await handleInterviewComplete();
         return;
       }
   
-      // Move to next question
       setCurrentQuestionIndex(prev => prev + 1);
       setTranscript("");
       
-      // Start recording for next question
       try {
         await startRecording();
       } catch (err) {
@@ -227,7 +223,6 @@ export default function PublicInterviewRoom() {
     try {
       setIsSubmitting(true);
   
-      // Save the final answer first
       if (transcript.trim()) {
         try {
           await api.post(`/api/public/interviews/${sessionId}/answer`, {
@@ -235,7 +230,6 @@ export default function PublicInterviewRoom() {
             questionId: questions[currentQuestionIndex]?.id,
           });
   
-          // Add final answer to history
           setQuestionHistory(prev => [
             ...prev,
             {
@@ -251,7 +245,6 @@ export default function PublicInterviewRoom() {
         }
       }
   
-      // Prepare complete question history including the last answer
       const finalQuestionHistory = [
         ...questionHistory,
         {
@@ -260,23 +253,22 @@ export default function PublicInterviewRoom() {
         }
       ];
   
-      // Complete the interview with all answers
       await api.post(`/api/public/interviews/${sessionId}/complete`, {
         questionHistory: finalQuestionHistory
       });
   
-      // Clean up and update UI state
       cleanupMedia();
       setStatus("complete");
       setInterviewComplete(true);
-      setIsSubmitting(false);
   
     } catch (err) {
       console.error("Failed to complete interview:", err);
       setError("Failed to complete interview. Please try again.");
+    } finally {
       setIsSubmitting(false);
     }
   };
+
   const cleanupMedia = () => {
     if (webSocketRef.current) {
       webSocketRef.current.close();
@@ -296,13 +288,11 @@ export default function PublicInterviewRoom() {
     stopFraudDetection();
   };
 
-  // Initialize interview on mount
   useEffect(() => {
     initializeInterview();
     return () => cleanupMedia();
   }, []);
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (volumeCheckIntervalRef.current) {
@@ -314,10 +304,19 @@ export default function PublicInterviewRoom() {
     };
   }, [isRecording]);
 
-  // ... Previous logic code ...
-
-  return (
-    <div className="container-fluid vh-100 bg-light p-3">
+return (
+  <div className="container-fluid vh-100 bg-light p-3">
+    {interviewComplete ? (
+      <div className="row justify-content-center">
+        <div className="col-md-8 col-lg-6">
+          <div className="card h-100">
+            <div className="card-body">
+              <CompletionMessage onClose={handleClose} />
+            </div>
+          </div>
+        </div>
+      </div>
+    ) : (
       <div className="row h-100">
         {/* Video Feed & Instructions Column */}
         <div className="col-6">
@@ -388,10 +387,7 @@ export default function PublicInterviewRoom() {
 
                     {/* Fraud Alerts */}
                     {fraudAlerts.map((alert, index) => (
-                      <div
-                        key={index}
-                        className="alert alert-danger d-flex align-items-center py-2 mb-2"
-                      >
+                      <div key={index} className="alert alert-danger d-flex align-items-center py-2 mb-2">
                         <i className="bi bi-exclamation-triangle-fill me-2"></i>
                         {alert}
                       </div>
@@ -410,45 +406,21 @@ export default function PublicInterviewRoom() {
                       </div>
                     )}
 
-                    {/* Recording Status */}
-                    {isRecording && !interviewComplete && (
-                      <div className="alert alert-info d-flex align-items-center py-2">
-                        <i className="bi bi-record-circle me-2"></i>
-                        Recording in progress
-                      </div>
-                    )}
-
-                    {/* Speech Recognition Status */}
-                    {isRecording && !interviewComplete && webSocketRef.current?.readyState === WebSocket.OPEN && (
-                      <div className="alert alert-success d-flex align-items-center py-2">
-                        <i className="bi bi-mic-fill me-2"></i>
-                        Speech recognition active
-                      </div>
-                    )}
-
-                    {/* Interview Complete Status */}
-                    {interviewComplete && (
-                      <div className="alert alert-success d-flex align-items-center py-2">
-                        <i className="bi bi-check-circle-fill me-2"></i>
-                        Interview completed
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Guidelines */}
-                  <div className="mt-3">
-                    <h6 className="text-muted">Guidelines:</h6>
-                    <ul className="small text-muted">
-                      <li>Ensure your face is clearly visible</li>
-                      <li>Stay centered in the frame</li>
-                      <li>Maintain good lighting</li>
-                      <li>Speak clearly into your microphone</li>
-                      {isRecording && !interviewComplete && (
-                        <li className="text-success">
-                          Your speech is being transcribed automatically
-                        </li>
-                      )}
-                    </ul>
+                    {/* Guidelines */}
+                    <div className="mt-3">
+                      <h6 className="text-muted">Guidelines:</h6>
+                      <ul className="small text-muted">
+                        <li>Ensure your face is clearly visible</li>
+                        <li>Stay centered in the frame</li>
+                        <li>Maintain good lighting</li>
+                        <li>Speak clearly into your microphone</li>
+                        {isRecording && !interviewComplete && (
+                          <li className="text-success">
+                            Your speech is being transcribed automatically
+                          </li>
+                        )}
+                      </ul>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -477,49 +449,47 @@ export default function PublicInterviewRoom() {
           </div>
         </div>
       </div>
+    )}
 
-      {/* Error Modal */}
-      {isRecording && error && !interviewComplete && (
-        <div
-          className="modal fade show d-block"
-          style={{ backgroundColor: "rgba(0,0,0,0.5)" }}
-        >
-          <div className="modal-dialog modal-dialog-centered">
-            <div className="modal-content">
-              <div className="modal-header">
-                <h5 className="modal-title">Connection Issue</h5>
-                <button 
-                  type="button" 
-                  className="btn-close" 
-                  onClick={() => setError(null)}
-                  aria-label="Close"
-                ></button>
-              </div>
-              <div className="modal-body">
-                <p>{error}</p>
-                <p>Please ensure you have a stable internet connection.</p>
-              </div>
-              <div className="modal-footer">
-                <button
-                  className="btn btn-secondary"
-                  onClick={() => setError(null)}
-                >
-                  Dismiss
-                </button>
-                <button
-                  className="btn btn-primary"
-                  onClick={() => {
-                    setError(null);
-                    startRecording();
-                  }}
-                >
-                  Retry Connection
-                </button>
-              </div>
+    {/* Error Modal */}
+    {isRecording && error && !interviewComplete && (
+      <div className="modal fade show d-block" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
+        <div className="modal-dialog modal-dialog-centered">
+          <div className="modal-content">
+            <div className="modal-header">
+              <h5 className="modal-title">Connection Issue</h5>
+              <button 
+                type="button" 
+                className="btn-close" 
+                onClick={() => setError(null)}
+                aria-label="Close"
+              ></button>
+            </div>
+            <div className="modal-body">
+              <p>{error}</p>
+              <p>Please ensure you have a stable internet connection.</p>
+            </div>
+            <div className="modal-footer">
+              <button
+                className="btn btn-secondary"
+                onClick={() => setError(null)}
+              >
+                Dismiss
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={() => {
+                  setError(null);
+                  startRecording();
+                }}
+              >
+                Retry Connection
+              </button>
             </div>
           </div>
         </div>
-      )}
-    </div>
-  );
+      </div>
+    )}
+  </div>
+);
 }

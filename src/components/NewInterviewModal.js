@@ -1,8 +1,4 @@
-/* 
- * frontend/src/components/NewInterviewModal.js
- * Modal for creating new interviews
- */
-
+// frontend/src/components/NewInterviewModal.js
 import { useState } from 'react';
 import api from '../services/api';
 import './NewInterviewModal.css';
@@ -20,9 +16,6 @@ export function NewInterviewModal({ onClose, onSuccess }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
 
-  /* 
-   * Form validation
-   */
   const validateForm = () => {
     const newErrors = {};
     
@@ -49,36 +42,6 @@ export function NewInterviewModal({ onClose, onSuccess }) {
     return Object.keys(newErrors).length === 0;
   };
 
-  /* 
-   * Form submission
-   */
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    
-    if (!validateForm()) return;
-
-    setIsSubmitting(true);
-    setSubmitError('');
-
-    try {
-      await api.post('/api/interviews', {
-        ...formData,
-        date: new Date(formData.scheduledTime).toISOString()
-      });
-      
-      onSuccess();
-      onClose();
-    } catch (err) {
-      console.error('Error creating interview:', err);
-      setSubmitError(err.response?.data?.error || 'Failed to create interview');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  /* 
-   * Input change handler
-   */
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData(prev => ({
@@ -92,6 +55,33 @@ export function NewInterviewModal({ onClose, onSuccess }) {
         [name]: ''
       }));
     }
+    setSubmitError('');
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    
+    if (!validateForm()) return;
+
+    setIsSubmitting(true);
+    setSubmitError('');
+
+    try {
+      // Submit the basic interview data
+      const response = await api.post('/api/interviews', {
+        ...formData,
+        date: new Date(formData.scheduledTime).toISOString()
+      });
+      
+      // Close modal immediately after successful submission
+      onSuccess();
+      onClose();
+
+    } catch (err) {
+      console.error('Error creating interview:', err);
+      setSubmitError(err.response?.data?.error || 'Failed to create interview');
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -99,7 +89,7 @@ export function NewInterviewModal({ onClose, onSuccess }) {
       <div className="modal-content">
         <div className="modal-header">
           <h2>Schedule New Interview</h2>
-          <button onClick={onClose} className="close-button">×</button>
+          <button onClick={onClose} className="close-button" disabled={isSubmitting}>×</button>
         </div>
 
         {submitError && (
@@ -117,6 +107,7 @@ export function NewInterviewModal({ onClose, onSuccess }) {
               value={formData.candidateName}
               onChange={handleChange}
               className={errors.candidateName ? 'error' : ''}
+              disabled={isSubmitting}
             />
             {errors.candidateName && (
               <span className="error-text">{errors.candidateName}</span>
@@ -133,6 +124,7 @@ export function NewInterviewModal({ onClose, onSuccess }) {
               value={formData.candidateEmail}
               onChange={handleChange}
               className={errors.candidateEmail ? 'error' : ''}
+              disabled={isSubmitting}
             />
             {errors.candidateEmail && (
               <span className="error-text">{errors.candidateEmail}</span>
@@ -147,6 +139,7 @@ export function NewInterviewModal({ onClose, onSuccess }) {
               name="type"
               value={formData.type}
               onChange={handleChange}
+              disabled={isSubmitting}
             >
               <option value="technical">Technical</option>
               <option value="behavioral">Behavioral</option>
@@ -162,6 +155,7 @@ export function NewInterviewModal({ onClose, onSuccess }) {
               name="level"
               value={formData.level}
               onChange={handleChange}
+              disabled={isSubmitting}
             >
               <option value="junior">Junior</option>
               <option value="mid">Mid-Level</option>
@@ -179,6 +173,7 @@ export function NewInterviewModal({ onClose, onSuccess }) {
               value={formData.scheduledTime}
               onChange={handleChange}
               className={errors.scheduledTime ? 'error' : ''}
+              disabled={isSubmitting}
             />
             {errors.scheduledTime && (
               <span className="error-text">{errors.scheduledTime}</span>
@@ -200,7 +195,14 @@ export function NewInterviewModal({ onClose, onSuccess }) {
               className="submit-button"
               disabled={isSubmitting}
             >
-              {isSubmitting ? 'Scheduling...' : 'Schedule Interview'}
+              {isSubmitting ? (
+                <>
+                  <span className="spinner"></span>
+                  Scheduling...
+                </>
+              ) : (
+                'Schedule Interview'
+              )}
             </button>
           </div>
         </form>
