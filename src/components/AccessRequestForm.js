@@ -54,57 +54,64 @@ export function AccessRequestForm() {
     if (error) setError('');
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+ 
+const handleSubmit = async (e) => {
+  e.preventDefault();
     
-    // Validate email
-    const emailError = validateEmail(formData.email);
-    if (emailError) {
-      setError(emailError);
-      return;
-    }
+  // Validate email
+  const emailError = validateEmail(formData.email);
+  if (emailError) {
+    setError(emailError);
+    return;
+  }
 
-    // Validate work domain
-    if (!formData.workDomain.trim()) {
-      setError('Work domain is required');
-      return;
-    }
+  // Validate work domain
+  if (!formData.workDomain.trim()) {
+    setError('Work domain is required');
+    return;
+  }
 
-    setIsSubmitting(true);
-    setError('');
+  setIsSubmitting(true);
+  setError('');
 
-    try {
-      const payload = {
-        workDomain: formData.workDomain.trim(),
-        email: formData.email.toLowerCase().trim(),
-        teamSize: formData.teamSize || undefined,
-        message: formData.message || undefined
-      };
+  try {
+    // Get reCAPTCHA token
+    const recaptchaToken = await window.grecaptcha.execute(process.env.REACT_APP_RECAPTCHA_SITE_KEY, {
+      action: 'submit_access_request'
+    });
 
-      // Send access request to backend
-      const response = await api.post('/api/access/request', payload, {
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      });
+    const payload = {
+      workDomain: formData.workDomain.trim(),
+      email: formData.email.toLowerCase().trim(),
+      teamSize: formData.teamSize || undefined,
+      message: formData.message || undefined,
+      recaptchaToken // Add token to payload
+    };
 
-      if (response.data) {
-        setSubmitted(true);
-      } else {
-        throw new Error('No response received');
+    // Send access request to backend
+    const response = await api.post('/api/access/request', payload, {
+      headers: {
+        'Content-Type': 'application/json'
       }
-    } catch (err) {
-      console.error('Access request error:', err);
-      setError(
-        err.response?.data?.error || 
-        err.response?.data?.details || 
-        err.message || 
-        'Failed to submit request. Please try again.'
-      );
-    } finally {
-      setIsSubmitting(false);
+    });
+
+    if (response.data) {
+      setSubmitted(true);
+    } else {
+      throw new Error('No response received');
     }
-  };
+  } catch (err) {
+    console.error('Access request error:', err);
+    setError(
+      err.response?.data?.error || 
+      err.response?.data?.details || 
+      err.message || 
+      'Failed to submit request. Please try again.'
+    );
+  } finally {
+    setIsSubmitting(false);
+  }
+};
 
   if (submitted) {
     return (
