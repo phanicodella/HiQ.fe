@@ -7,6 +7,8 @@ import PublicInterviewRoom from './pages/PublicInterviewRoom';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { AdminAccessRequests } from './pages/AdminAccessRequests';
 import Navbar from './components/Navbar';
+import { VerifyEmail } from './components/auth/verifyEmail';
+
 
 function App() {
   return (
@@ -19,6 +21,8 @@ function App() {
             <Route path="/login" element={<Login />} />
             
             <Route path="/:sessionId" element={<PublicInterviewRoom />} />
+            <Route path="/verify-email/:token" element={<VerifyEmail />} />
+
             
             <Route 
               path="/admin/access-requests" 
