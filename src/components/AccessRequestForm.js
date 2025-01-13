@@ -1,5 +1,102 @@
+// frontend/src/components/AccessRequestForm.js
 import React, { useState } from 'react';
 import api from '../services/api';
+
+const SimpleCaptcha = ({ onVerify }) => {
+  const [captchaText, setCaptchaText] = useState('');
+  const [userInput, setUserInput] = useState('');
+  const [isValid, setIsValid] = useState(false);
+  const [attempts, setAttempts] = useState(0);
+
+  const generateCaptcha = () => {
+    const charset = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+    let result = '';
+    for (let i = 0; i < 6; i++) {
+      result += charset.charAt(Math.floor(Math.random() * charset.length));
+    }
+    setCaptchaText(result);
+    setUserInput('');
+    setIsValid(false);
+    onVerify(false); // Reset verification state when generating new captcha
+  };
+
+  React.useEffect(() => {
+    generateCaptcha();
+  }, []);
+
+  const handleInputChange = (e) => {
+    setUserInput(e.target.value);
+  };
+
+  const handleVerify = () => {
+    const isCorrect = userInput === captchaText;
+    setIsValid(isCorrect);
+    setAttempts(prev => prev + 1);
+    
+    if (isCorrect) {
+      onVerify(true);
+    } else {
+      if (attempts >= 2) {
+        generateCaptcha();
+        setAttempts(0);
+      }
+      onVerify(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-gray-100 p-4 rounded-lg">
+        <div className="relative">
+          <div 
+            className="text-2xl font-mono tracking-wider select-none"
+            style={{
+              backgroundImage: 'linear-gradient(45deg, #f0f0f0 25%, transparent 25%), linear-gradient(-45deg, #f0f0f0 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #f0f0f0 75%), linear-gradient(-45deg, transparent 75%, #f0f0f0 75%)',
+              backgroundSize: '20px 20px',
+              backgroundPosition: '0 0, 0 10px, 10px -10px, -10px 0px',
+              padding: '1rem',
+              textShadow: '2px 2px 3px rgba(0,0,0,0.3)',
+              letterSpacing: '0.5em'
+            }}
+          >
+            {captchaText}
+          </div>
+          
+          <button
+            onClick={generateCaptcha}
+            className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700"
+            type="button"
+          >
+            ↻
+          </button>
+        </div>
+      </div>
+
+      <div className="flex space-x-2">
+        <input
+          type="text"
+          value={userInput}
+          onChange={handleInputChange}
+          placeholder="Enter captcha text"
+          className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 text-gray-900 bg-white"
+        />
+        <button
+          onClick={handleVerify}
+          type="button"
+          className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+        >
+          Verify
+        </button>
+      </div>
+
+      {attempts > 0 && !isValid && (
+        <p className="text-red-600 text-sm">
+          {attempts >= 2 ? 'Too many attempts. New captcha generated.' : 'Incorrect captcha. Please try again.'}
+        </p>
+      )}
+    </div>
+  );
+};
 
 export function AccessRequestForm() {
   const [formData, setFormData] = useState({
@@ -12,8 +109,8 @@ export function AccessRequestForm() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState('');
+  const [captchaVerified, setCaptchaVerified] = useState(false);
 
-  // List of generic email domains to block
   const genericDomains = [
     'gmail.com', 
     'googlemail.com', 
@@ -28,13 +125,11 @@ export function AccessRequestForm() {
   ];
 
   const validateEmail = (email) => {
-    // Basic email format validation
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
       return 'Invalid email format';
     }
 
-    // Check against generic domains
     const domain = email.split('@')[1].toLowerCase();
     if (genericDomains.includes(domain)) {
       return 'Please use a work email address';
@@ -50,21 +145,23 @@ export function AccessRequestForm() {
       [name]: value
     }));
     
-    // Clear any existing errors
     if (error) setError('');
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     
-    // Validate email
+    if (!captchaVerified) {
+      setError('Please complete the captcha verification');
+      return;
+    }
+
     const emailError = validateEmail(formData.email);
     if (emailError) {
       setError(emailError);
       return;
     }
 
-    // Validate work domain
     if (!formData.workDomain.trim()) {
       setError('Work domain is required');
       return;
@@ -77,32 +174,38 @@ export function AccessRequestForm() {
       const payload = {
         workDomain: formData.workDomain.trim(),
         email: formData.email.toLowerCase().trim(),
-        teamSize: formData.teamSize || undefined,
+        teamSize: formData.teamSize ? parseInt(formData.teamSize) : undefined,
         message: formData.message || undefined
       };
 
-      // Send access request to backend
-      const response = await api.post('/api/access/request', payload, {
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      });
+      console.log('Sending payload:', payload);
 
-      if (response.data) {
-        setSubmitted(true);
-      } else {
-        throw new Error('No response received');
-      }
+      const response = await api.post('/api/access/request', payload);
+      setSubmitted(true);
+
     } catch (err) {
       console.error('Access request error:', err);
-      setError(
-        err.response?.data?.error || 
-        err.response?.data?.details || 
-        err.message || 
-        'Failed to submit request. Please try again.'
-      );
+      if (err.response?.data?.error === 'A request from this email is already pending') {
+        setError('You already have a pending access request. Please wait for admin approval.');
+      } else {
+        setError(
+          err.response?.data?.error || 
+          err.response?.data?.details || 
+          err.message || 
+          'Failed to submit request. Please try again.'
+        );
+      }
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleCaptchaVerify = (success) => {
+    setCaptchaVerified(success);
+    if (!success) {
+      setError('Captcha verification failed. Please try again.');
+    } else {
+      setError('');
     }
   };
 
@@ -162,7 +265,7 @@ export function AccessRequestForm() {
                 onChange={handleChange}
                 required 
                 placeholder="Enter your company domain (e.g., talentsync.tech)"
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 transition duration-300 ease-in-out transform hover:shadow-sm text-gray-900"
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 transition duration-300 ease-in-out transform hover:shadow-sm text-gray-900 bg-white"
                 autoComplete="off"
               />
             </div>
@@ -178,7 +281,7 @@ export function AccessRequestForm() {
                 onChange={handleChange}
                 required 
                 placeholder="Enter your work email"
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 transition duration-300 ease-in-out transform hover:shadow-sm text-gray-900"
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 transition duration-300 ease-in-out transform hover:shadow-sm text-gray-900 bg-white"
                 autoComplete="off"
               />
             </div>
@@ -193,7 +296,7 @@ export function AccessRequestForm() {
                 value={formData.teamSize}
                 onChange={handleChange}
                 placeholder="Number of employees (optional)"
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 transition duration-300 ease-in-out transform hover:shadow-sm text-gray-900"
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 transition duration-300 ease-in-out transform hover:shadow-sm text-gray-900 bg-white"
                 autoComplete="off"
               />
             </div>
@@ -207,9 +310,13 @@ export function AccessRequestForm() {
                 value={formData.message}
                 onChange={handleChange}
                 placeholder="Tell us about your hiring needs"
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 transition duration-300 ease-in-out transform hover:shadow-sm text-gray-900"
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 transition duration-300 ease-in-out transform hover:shadow-sm text-gray-900 bg-white"
                 rows="4"
               />
+            </div>
+
+            <div className="mt-6">
+              <SimpleCaptcha onVerify={handleCaptchaVerify} />
             </div>
 
             {error && (
@@ -220,8 +327,8 @@ export function AccessRequestForm() {
 
             <button 
               type="submit" 
-              disabled={isSubmitting}
-              className="w-full py-3 px-4 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition duration-300 ease-in-out transform hover:-translate-y-1 hover:scale-[1.02] active:translate-y-0 active:scale-100 disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={isSubmitting || !captchaVerified}
+              className="w-full py-3 px-4 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition duration-300 ease-in-out transform hover:-translate-y-1 hover:scale-[1.02] active:translate-y-0 active:scale-100 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:transform-none"
             >
               {isSubmitting ? 'Submitting...' : 'Request Access'}
             </button>
