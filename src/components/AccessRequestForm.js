@@ -167,8 +167,8 @@ export function AccessRequestForm() {
       return;
     }
 
-    setIsSubmitting(true);
-    setError('');
+  setIsSubmitting(true);
+  setError('');
 
     try {
       const payload = {
