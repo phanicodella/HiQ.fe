@@ -8,6 +8,8 @@ import { ProtectedRoute } from './components/ProtectedRoute';
 import { AdminAccessRequests } from './pages/AdminAccessRequests';
 import Navbar from './components/Navbar';
 import { VerifyEmail } from './components/auth/verifyEmail';
+import { RegisterForm } from './components/RegisterForm';  // Add this import
+
 
 
 function App() {
@@ -22,6 +24,7 @@ function App() {
             
             <Route path="/:sessionId" element={<PublicInterviewRoom />} />
             <Route path="/verify-email/:token" element={<VerifyEmail />} />
+            <Route path="/register/:token" element={<RegisterForm />} />
 
             
             <Route 
