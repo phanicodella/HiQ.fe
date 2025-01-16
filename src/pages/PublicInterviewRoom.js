@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { useParams } from "react-router-dom";
 import api from "../services/api";
 import QnASection from "../components/QnASection";
-import AzureSpeechRecognition from './components/AzureSpeechRecognition';
+import AzureSpeechRecognition from '../components/AzureSpeechRecognition';
 import AudioProcessor from "../components/AudioProcessor";
 import CompletionMessage from '../components/CompletionMessage';
 

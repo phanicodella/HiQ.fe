@@ -314,8 +314,10 @@ export function AccessRequestForm() {
                 rows="4"
               />
             </div>
-
-            <div className="mt-6">
+            <p className="text-sm text-red-800 italic mt-4 mb-2">
+            Note: Our captcha verification is case-sensitive
+          </p>
+            <div className="mt-2">
               <SimpleCaptcha onVerify={handleCaptchaVerify} />
             </div>
 
