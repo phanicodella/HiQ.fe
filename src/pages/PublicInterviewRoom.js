@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { useParams } from "react-router-dom";
 import api from "../services/api";
 import QnASection from "../components/QnASection";
-import AzureSpeechRecognition from "../components/AzureSpeechRecognition";
+import AzureSpeechRecognition from './components/AzureSpeechRecognition';
 import AudioProcessor from "../components/AudioProcessor";
 import CompletionMessage from '../components/CompletionMessage';
 
@@ -33,6 +33,8 @@ export default function PublicInterviewRoom() {
   const { sessionId } = useParams();
 
   const handleTranscriptionUpdate = (newTranscript) => {
+    console.log('New transcript:', newTranscript);
+
     if (!interviewComplete) {
       setTranscript(newTranscript);
     }
@@ -340,6 +342,8 @@ return (
                     isRecording={isRecording && !interviewComplete}
                     onTranscriptionUpdate={handleTranscriptionUpdate}
                     onError={handleSpeechError}
+                    language="en-US"
+                    continuous={true}
                   />
                   <AudioProcessor
                     isRecording={isRecording && !interviewComplete}
