@@ -23,7 +23,9 @@
     "build": "react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject",
-    "dev": "react-scripts start"
+    "dev": "react-scripts start",
+    "setup-admin": "node scripts/setupAdmin.js",
+    "update-admin": "node scripts/setupAdmin.js --update"
   },
   "eslintConfig": {
     "extends": [
