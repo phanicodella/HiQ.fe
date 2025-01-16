@@ -1,4 +1,3 @@
-// frontend/src/components/AccessRequestForm.js
 import React, { useState } from 'react';
 import api from '../services/api';
 
@@ -151,24 +150,30 @@ export function AccessRequestForm() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     
+    // Log the submission attempt
+    console.log('Form submission initiated');
+    
     if (!captchaVerified) {
       setError('Please complete the captcha verification');
+      console.log('Submission blocked: Captcha not verified');
       return;
     }
 
     const emailError = validateEmail(formData.email);
     if (emailError) {
       setError(emailError);
+      console.log('Submission blocked: Email validation failed -', emailError);
       return;
     }
 
     if (!formData.workDomain.trim()) {
       setError('Work domain is required');
+      console.log('Submission blocked: Work domain missing');
       return;
     }
 
-  setIsSubmitting(true);
-  setError('');
+    setIsSubmitting(true);
+    setError('');
 
     try {
       const payload = {
@@ -178,13 +183,22 @@ export function AccessRequestForm() {
         message: formData.message || undefined
       };
 
+      // Log the payload being sent
       console.log('Sending payload:', payload);
 
       const response = await api.post('/api/access/request', payload);
+      console.log('Server response:', response.data);
+      
       setSubmitted(true);
 
     } catch (err) {
-      console.error('Access request error:', err);
+      console.error('Access request error:', {
+        message: err.message,
+        response: err.response?.data,
+        status: err.response?.status,
+        details: err.response?.data?.details
+      });
+
       if (err.response?.data?.error === 'A request from this email is already pending') {
         setError('You already have a pending access request. Please wait for admin approval.');
       } else {
@@ -315,8 +329,8 @@ export function AccessRequestForm() {
               />
             </div>
             <p className="text-sm text-red-800 italic mt-4 mb-2">
-            Note: Our captcha verification is case-sensitive
-          </p>
+              Note: Our captcha verification is case-sensitive
+            </p>
             <div className="mt-2">
               <SimpleCaptcha onVerify={handleCaptchaVerify} />
             </div>
